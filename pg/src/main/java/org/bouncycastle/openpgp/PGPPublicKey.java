@@ -292,6 +292,7 @@ public class PGPPublicKey
     {
         Iterator signatures = this.getSignaturesOfType(signatureType);
         long     expiryTime = -1;
+        long     lastDate = -1;
 
         while (signatures.hasNext())
         {
@@ -305,9 +306,20 @@ public class PGPPublicKey
                 {
                     long current = hashed.getKeyExpirationTime();
 
-                    if (current == 0 || current > expiryTime)
+                    if (sig.getKeyID() == this.getKeyID())
                     {
-                        expiryTime = current;
+                        if (sig.getCreationTime().getTime() > lastDate)
+                        {
+                            lastDate = sig.getCreationTime().getTime();
+                            expiryTime = current;
+                        }
+                    }
+                    else
+                    {
+                        if (current == 0 || current > expiryTime)
+                        {
+                            expiryTime = current;
+                        }
                     }
                 }
                 else
@@ -394,7 +406,7 @@ public class PGPPublicKey
      * 
      * @return an iterator of Strings.
      */
-    public Iterator getUserIDs()
+    public Iterator<String> getUserIDs()
     {
         List    temp = new ArrayList();
         
@@ -415,7 +427,7 @@ public class PGPPublicKey
      *
      * @return an iterator of Strings.
      */
-    public Iterator getRawUserIDs()
+    public Iterator<byte[]> getRawUserIDs()
     {
         List    temp = new ArrayList();
 
@@ -435,7 +447,7 @@ public class PGPPublicKey
      * 
      * @return an iterator of PGPUserAttributeSubpacketVector objects.
      */
-    public Iterator getUserAttributes()
+    public Iterator<PGPUserAttributeSubpacketVector> getUserAttributes()
     {
         List    temp = new ArrayList();
         
@@ -1048,13 +1060,13 @@ public class PGPPublicKey
         {
             for (Iterator it = key.getRawUserIDs(); it.hasNext();)
             {
-                UserIDPacket id = (UserIDPacket)it.next();
-                for (Iterator sIt = key.getSignaturesForID(id); sIt.hasNext();)
+                byte[] rawID = (byte[])it.next();
+                for (Iterator sIt = key.getSignaturesForID(rawID); sIt.hasNext();)
                 {
                     if (certification == sIt.next())
                     {
                         found = true;
-                        returnKey = PGPPublicKey.removeCertification(returnKey, id.getRawID(), certification);
+                        returnKey = PGPPublicKey.removeCertification(returnKey, rawID, certification);
                     }
                 }
             }

@@ -22,7 +22,7 @@ public class BouncyCastleJsseProvider
     public static final String PROVIDER_NAME = "BCJSSE";
 
     private static final double version = 0.9;
-    
+
     private Map<String, BcJsseService> serviceMap = new HashMap<String, BcJsseService>();
     private Map<String, EngineCreator> creatorMap = new HashMap<String, EngineCreator>();
 
@@ -159,16 +159,23 @@ public class BouncyCastleJsseProvider
         addAlias("Alg.Alias.TrustManagerFactory.X.509", "PKIX");
         addAlias("Alg.Alias.TrustManagerFactory.X509", "PKIX");
 
-        if (isInFipsMode == false)
-        {
-            addAlgorithmImplementation("SSLContext.SSL", "org.bouncycastle.jsse.provider.SSLContext.TLS", new EngineCreator()
-            {
-                public Object createInstance(Object constructorParameter)
-                {
-                    return new ProvSSLContextSpi(baseCryptoProvider);
-                }
-            });
-        }
+//        if (isInFipsMode == false)
+//        {
+//            addAlgorithmImplementation("SSLContext.SSL", "org.bouncycastle.jsse.provider.SSLContext.SSL", new EngineCreator()
+//            {
+//                public Object createInstance(Object constructorParameter)
+//                {
+//                    return new ProvSSLContextSpi(baseCryptoProvider, new String[]{ "SSLv3", "TLSv1", "TLSv1.1", "TLSv1.2" });
+//                }
+//            });
+//            addAlgorithmImplementation("SSLContext.SSLv3", "org.bouncycastle.jsse.provider.SSLContext.SSLv3", new EngineCreator()
+//            {
+//                public Object createInstance(Object constructorParameter)
+//                {
+//                    return new ProvSSLContextSpi(baseCryptoProvider, new String[]{ "SSLv3", "TLSv1", "TLSv1.1", "TLSv1.2" });
+//                }
+//            });
+//        }
 
         addAlgorithmImplementation("SSLContext.TLS", "org.bouncycastle.jsse.provider.SSLContext.TLS", new EngineCreator()
         {
@@ -177,18 +184,42 @@ public class BouncyCastleJsseProvider
                 return new ProvSSLContextSpi(baseCryptoProvider);
             }
         });
-        addAlgorithmImplementation("SSLContext.TLSv1", "org.bouncycastle.jsse.provider.SSLContext.TLS.1", new EngineCreator()
+        addAlgorithmImplementation("SSLContext.TLSV1", "org.bouncycastle.jsse.provider.SSLContext.TLSv1", new EngineCreator()
+        {
+            public Object createInstance(Object constructorParameter)
+            {
+                return new ProvSSLContextSpi(baseCryptoProvider, new String[]{ "TLSv1", "TLSv1.1", "TLSv1.2" });
+            }
+        });
+        addAlgorithmImplementation("SSLContext.TLSV1.1", "org.bouncycastle.jsse.provider.SSLContext.TLSv1_1", new EngineCreator()
+        {
+            public Object createInstance(Object constructorParameter)
+            {
+                return new ProvSSLContextSpi(baseCryptoProvider, new String[]{ "TLSv1.1", "TLSv1.2" });
+            }
+        });
+        addAlgorithmImplementation("SSLContext.TLSV1.2", "org.bouncycastle.jsse.provider.SSLContext.TLSv1_2", new EngineCreator()
         {
             public Object createInstance(Object constructorParameter)
             {
                 return new ProvSSLContextSpi(baseCryptoProvider);
             }
         });
-        addAlgorithmImplementation("SSLContext.Default", "org.bouncycastle.jsse.provider.SSLContext.TLS.Default", new EngineCreator()
+        addAlgorithmImplementation("SSLContext.DEFAULT", "org.bouncycastle.jsse.provider.SSLContext.Default", new EngineCreator()
         {
             public Object createInstance(Object constructorParameter)
             {
-                return new ProvSSLContextSpi(baseCryptoProvider);
+                try
+                {
+                    ProvSSLContextSpi defaultSSLContextSpi = new ProvSSLContextSpi(baseCryptoProvider);
+                    defaultSSLContextSpi.engineInit(null, null, null);
+                    return defaultSSLContextSpi;
+                }
+                catch (GeneralSecurityException e)
+                {
+                    // TODO[jsse] Log this exception
+                    return null;
+                }
             }
         });
     }
@@ -360,4 +391,13 @@ public class BouncyCastleJsseProvider
             }
         }
     }
+
+//    private static final class FipsCapabilities
+//        extends TlsCryptoCapabilities
+//    {
+//        public FipsCapabilities()
+//        {
+//            super(new int[]{ NamedCurve.secp256r1, NamedCurve.secp384r1 });
+//        }
+//    }
 }

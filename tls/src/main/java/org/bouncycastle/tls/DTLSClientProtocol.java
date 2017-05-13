@@ -8,6 +8,7 @@ import java.util.Enumeration;
 import java.util.Hashtable;
 import java.util.Vector;
 
+import org.bouncycastle.tls.crypto.TlsStreamSigner;
 import org.bouncycastle.util.Arrays;
 
 public class DTLSClientProtocol
@@ -149,16 +150,16 @@ public class DTLSClientProtocol
             recordLayer.initPendingEpoch(state.client.getCipher());
 
             // NOTE: Calculated exclusive of the actual Finished message from the server
-            byte[] expectedServerVerifyData = TlsUtils.calculateVerifyData(state.clientContext, ExporterLabel.server_finished,
-                TlsProtocol.getCurrentPRFHash(state.clientContext, handshake.getHandshakeHash(), null));
+            byte[] expectedServerVerifyData = createVerifyData(state.clientContext, handshake, true);
             processFinished(handshake.receiveMessageBody(HandshakeType.finished), expectedServerVerifyData);
 
             // NOTE: Calculated exclusive of the Finished message itself
-            byte[] clientVerifyData = TlsUtils.calculateVerifyData(state.clientContext, ExporterLabel.client_finished,
-                TlsProtocol.getCurrentPRFHash(state.clientContext, handshake.getHandshakeHash(), null));
+            byte[] clientVerifyData = createVerifyData(state.clientContext, handshake, false);
             handshake.sendMessage(HandshakeType.finished, clientVerifyData);
 
             handshake.finish();
+
+            securityParameters.tlsUnique = expectedServerVerifyData;
 
             state.clientContext.setSession(state.tlsSession);
 
@@ -257,8 +258,6 @@ public class DTLSClientProtocol
             throw new TlsFatalAlert(AlertDescription.unexpected_message);
         }
 
-        handshake.getHandshakeHash().sealHashAlgorithms();
-
         Vector clientSupplementalData = state.client.getClientSupplementalData();
         if (clientSupplementalData != null)
         {
@@ -292,53 +291,46 @@ public class DTLSClientProtocol
             handshake.sendMessage(HandshakeType.certificate, certificateBody);
         }
 
+        TlsCredentialedSigner credentialedSigner = null;
+        TlsStreamSigner streamSigner = null;
+
         if (state.clientCredentials != null)
         {
             state.keyExchange.processClientCredentials(state.clientCredentials);
+            
+            if (state.clientCredentials instanceof TlsCredentialedSigner)
+            {
+                credentialedSigner = (TlsCredentialedSigner)state.clientCredentials;
+                streamSigner = credentialedSigner.getStreamSigner();
+            }
         }
         else
         {
             state.keyExchange.skipClientCredentials();
         }
 
+        boolean forceBuffering = streamSigner != null;
+        TlsUtils.sealHandshakeHash(state.clientContext, handshake.getHandshakeHash(), forceBuffering);
+
         byte[] clientKeyExchangeBody = generateClientKeyExchange(state);
         handshake.sendMessage(HandshakeType.client_key_exchange, clientKeyExchangeBody);
 
         TlsHandshakeHash prepareFinishHash = handshake.prepareToFinish();
-        securityParameters.sessionHash = TlsProtocol.getCurrentPRFHash(state.clientContext, prepareFinishHash, null);
+        securityParameters.sessionHash = TlsUtils.getCurrentPRFHash(prepareFinishHash);
 
         TlsProtocol.establishMasterSecret(state.clientContext, state.keyExchange);
         recordLayer.initPendingEpoch(state.client.getCipher());
 
-        if (state.clientCredentials != null && state.clientCredentials instanceof TlsCredentialedSigner)
+        if (credentialedSigner != null)
         {
-            TlsCredentialedSigner signerCredentials = (TlsCredentialedSigner)state.clientCredentials;
-
-            /*
-             * RFC 5246 4.7. digitally-signed element needs SignatureAndHashAlgorithm from TLS 1.2
-             */
-            SignatureAndHashAlgorithm signatureAndHashAlgorithm = TlsUtils.getSignatureAndHashAlgorithm(
-                state.clientContext, signerCredentials);
-
-            byte[] hash;
-            if (signatureAndHashAlgorithm == null)
-            {
-                hash = securityParameters.getSessionHash();
-            }
-            else
-            {
-                hash = prepareFinishHash.getFinalHash(signatureAndHashAlgorithm.getHash());
-            }
-
-            byte[] signature = signerCredentials.generateRawSignature(hash);
-            DigitallySigned certificateVerify = new DigitallySigned(signatureAndHashAlgorithm, signature);
+            DigitallySigned certificateVerify = TlsUtils.generateCertificateVerify(state.clientContext,
+                credentialedSigner, streamSigner, prepareFinishHash);
             byte[] certificateVerifyBody = generateCertificateVerify(state, certificateVerify);
             handshake.sendMessage(HandshakeType.certificate_verify, certificateVerifyBody);
         }
 
         // NOTE: Calculated exclusive of the Finished message itself
-        byte[] clientVerifyData = TlsUtils.calculateVerifyData(state.clientContext, ExporterLabel.client_finished,
-            TlsProtocol.getCurrentPRFHash(state.clientContext, handshake.getHandshakeHash(), null));
+        byte[] clientVerifyData = createVerifyData(state.clientContext, handshake, false);
         handshake.sendMessage(HandshakeType.finished, clientVerifyData);
 
         if (state.expectSessionTicket)
@@ -355,8 +347,7 @@ public class DTLSClientProtocol
         }
 
         // NOTE: Calculated exclusive of the actual Finished message from the server
-        byte[] expectedServerVerifyData = TlsUtils.calculateVerifyData(state.clientContext, ExporterLabel.server_finished,
-            TlsProtocol.getCurrentPRFHash(state.clientContext, handshake.getHandshakeHash(), null));
+        byte[] expectedServerVerifyData = createVerifyData(state.clientContext, handshake, true);
         processFinished(handshake.receiveMessageBody(HandshakeType.finished), expectedServerVerifyData);
 
         handshake.finish();
@@ -375,6 +366,8 @@ public class DTLSClientProtocol
             .build();
 
         state.tlsSession = TlsUtils.importSession(state.tlsSession.getSessionID(), state.sessionParameters);
+
+        securityParameters.tlsUnique = clientVerifyData;
 
         state.clientContext.setSession(state.tlsSession);
 
@@ -816,7 +809,7 @@ public class DTLSClientProtocol
             securityParameters.getCipherSuite());
 
         /*
-         * RFC 5264 7.4.9. Any cipher suite which does not explicitly specify verify_data_length has
+         * RFC 5246 7.4.9. Any cipher suite which does not explicitly specify verify_data_length has
          * a verify_data_length equal to 12. This includes all existing cipher suites.
          */
         securityParameters.verifyDataLength = 12;

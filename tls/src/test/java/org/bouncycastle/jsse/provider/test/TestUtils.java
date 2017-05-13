@@ -26,6 +26,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
+import javax.net.ssl.SSLSocket;
+
 import org.bouncycastle.asn1.ASN1EncodableVector;
 import org.bouncycastle.asn1.ASN1Encoding;
 import org.bouncycastle.asn1.ASN1Integer;
@@ -33,6 +35,8 @@ import org.bouncycastle.asn1.DERBitString;
 import org.bouncycastle.asn1.DERNull;
 import org.bouncycastle.asn1.DERSequence;
 import org.bouncycastle.asn1.cryptopro.CryptoProObjectIdentifiers;
+import org.bouncycastle.asn1.nist.NISTObjectIdentifiers;
+import org.bouncycastle.asn1.oiw.OIWObjectIdentifiers;
 import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
@@ -53,6 +57,8 @@ import org.bouncycastle.asn1.x509.V1TBSCertificateGenerator;
 import org.bouncycastle.asn1.x509.V3TBSCertificateGenerator;
 import org.bouncycastle.asn1.x9.X9ObjectIdentifiers;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.jsse.BCSSLConnection;
+import org.bouncycastle.jsse.BCSSLSocket;
 
 /**
  * Test Utils
@@ -65,8 +71,14 @@ class TestUtils
     static
     {
         algIds.put("GOST3411withGOST3410", new AlgorithmIdentifier(CryptoProObjectIdentifiers.gostR3411_94_with_gostR3410_94));
+        algIds.put("SHA1withDSA", new AlgorithmIdentifier(OIWObjectIdentifiers.dsaWithSHA1, DERNull.INSTANCE));
+        algIds.put("SHA224withDSA", new AlgorithmIdentifier(NISTObjectIdentifiers.dsa_with_sha224, DERNull.INSTANCE));
+        algIds.put("SHA256withDSA", new AlgorithmIdentifier(NISTObjectIdentifiers.dsa_with_sha256, DERNull.INSTANCE));
         algIds.put("SHA1withRSA", new AlgorithmIdentifier(PKCSObjectIdentifiers.sha1WithRSAEncryption, DERNull.INSTANCE));
+        algIds.put("SHA224withRSA", new AlgorithmIdentifier(PKCSObjectIdentifiers.sha224WithRSAEncryption, DERNull.INSTANCE));
         algIds.put("SHA256withRSA", new AlgorithmIdentifier(PKCSObjectIdentifiers.sha256WithRSAEncryption, DERNull.INSTANCE));
+        algIds.put("SHA1withECDSA", new AlgorithmIdentifier(X9ObjectIdentifiers.ecdsa_with_SHA1));
+        algIds.put("SHA224withECDSA", new AlgorithmIdentifier(X9ObjectIdentifiers.ecdsa_with_SHA224));
         algIds.put("SHA256withECDSA", new AlgorithmIdentifier(X9ObjectIdentifiers.ecdsa_with_SHA256));
     }
 
@@ -150,6 +162,19 @@ class TestUtils
     }
 
     /**
+     * Create a random 1024 bit DSA key pair
+     */
+    public static KeyPair generateDSAKeyPair()
+        throws Exception
+    {
+        KeyPairGenerator kpGen = KeyPairGenerator.getInstance("DSA", BouncyCastleProvider.PROVIDER_NAME);
+
+        kpGen.initialize(1024, new SecureRandom());
+
+        return kpGen.generateKeyPair();
+    }
+
+    /**
      * Create a random 1024 bit RSA key pair
      */
     public static KeyPair generateRSAKeyPair()
@@ -175,7 +200,12 @@ class TestUtils
     public static X509Certificate generateRootCert(KeyPair pair)
         throws Exception
     {
-        if (pair.getPublic().getAlgorithm().equals("RSA"))
+        String alg = pair.getPublic().getAlgorithm();
+        if (alg.equals("DSA"))
+        {
+            return createSelfSignedCert("CN=Test CA Certificate", "SHA1withDSA", pair);
+        }
+        else if (alg.equals("RSA"))
         {
             return createSelfSignedCert("CN=Test CA Certificate", "SHA256withRSA", pair);
         }
@@ -274,7 +304,6 @@ class TestUtils
             caCertLw.getSerialNumber().getValue()));
         extGen.addExtension(Extension.subjectKeyIdentifier, false, new SubjectKeyIdentifier(getDigest(entityKey.getEncoded())));
         extGen.addExtension(Extension.basicConstraints, true, new BasicConstraints(0));
-//        extGen.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature | KeyUsage.keyCertSign | KeyUsage.cRLSign));
         extGen.addExtension(Extension.keyUsage, true, new KeyUsage(keyUsage));
 
         if (entityKey.getAlgorithm().equals("RSA"))
@@ -289,6 +318,19 @@ class TestUtils
                 caCertLw.getSubject(),
                 caKey, subject, "SHA256withECDSA", extGen.generate(), entityKey);
         }
+    }
+
+    public static byte[] getChannelBinding(SSLSocket s, String channelBinding)
+    {
+        if (s instanceof BCSSLSocket)
+        {
+            BCSSLConnection connection = ((BCSSLSocket)s).getConnection();
+            if (connection != null)
+            {
+                return connection.getChannelBinding(channelBinding);
+            }
+        }
+        return null;
     }
 
     public static X509Certificate createExceptionCertificate(boolean exceptionOnEncode)

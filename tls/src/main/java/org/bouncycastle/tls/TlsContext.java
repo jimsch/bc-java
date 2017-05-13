@@ -2,12 +2,20 @@ package org.bouncycastle.tls;
 
 import org.bouncycastle.tls.crypto.TlsCrypto;
 
+/**
+ * Base interface for a TLS context implementation.
+ */
 public interface TlsContext
 {
     TlsCrypto getCrypto();
 
     SecurityParameters getSecurityParameters();
 
+    /**
+     * Return true if this context is for a server, false otherwise.
+     *
+     * @return true for a server based context, false for a client based one.
+     */
     boolean isServer();
 
     ProtocolVersion getClientVersion();
@@ -37,6 +45,15 @@ public interface TlsContext
     Object getUserObject();
 
     void setUserObject(Object userObject);
+
+    /**
+     * Export the value of the specified channel binding. Only available after the handshake has
+     * successfully completed.
+     * 
+     * @param channelBinding A {@link ChannelBinding} constant specifying the channel binding to export.
+     * @return A copy of the channel binding data as a {@link byte[]}.
+     */
+    byte[] exportChannelBinding(int channelBinding);
 
     /**
      * Export keying material according to RFC 5705: "Keying Material Exporters for TLS".

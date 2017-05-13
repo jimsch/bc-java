@@ -2,9 +2,12 @@ package org.bouncycastle.tls.crypto.impl.jcajce;
 
 import java.io.IOException;
 import java.math.BigInteger;
+import java.security.AlgorithmParameters;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.security.interfaces.RSAPublicKey;
+import java.security.spec.ECGenParameterSpec;
+import java.security.spec.ECParameterSpec;
 
 import javax.crypto.Cipher;
 
@@ -15,6 +18,7 @@ import org.bouncycastle.tls.CombinedHash;
 import org.bouncycastle.tls.EncryptionAlgorithm;
 import org.bouncycastle.tls.HashAlgorithm;
 import org.bouncycastle.tls.MACAlgorithm;
+import org.bouncycastle.tls.NamedCurve;
 import org.bouncycastle.tls.ProtocolVersion;
 import org.bouncycastle.tls.SignatureAndHashAlgorithm;
 import org.bouncycastle.tls.TlsFatalAlert;
@@ -66,6 +70,8 @@ public class JcaTlsCrypto
     private final SecureRandom entropySource;
     private final SecureRandom nonceEntropySource;
 
+    private final Boolean[]    supportedCurveIDs = new Boolean[28 + 1];  // current max curveID + 1
+
     /**
      * Base constructor.
      *
@@ -80,9 +86,56 @@ public class JcaTlsCrypto
         this.nonceEntropySource = nonceEntropySource;
     }
 
+    private boolean checkCurve(int namedCurve)
+    {
+        String curveName = NamedCurve.getNameOfSpecificCurve(namedCurve);
+        if (curveName == null)
+        {
+             return false;
+        }
+
+        if (namedCurve < supportedCurveIDs.length && supportedCurveIDs[namedCurve] != null)
+        {
+            return supportedCurveIDs[namedCurve].booleanValue();
+        }
+
+        try
+        {
+            AlgorithmParameters params = this.getHelper().createAlgorithmParameters("EC");
+
+            params.init(new ECGenParameterSpec(curveName));
+
+            boolean supported = params.getParameterSpec(ECParameterSpec.class) != null;
+            if (namedCurve < supportedCurveIDs.length)
+            {
+                supportedCurveIDs[namedCurve] = Boolean.valueOf(supported);
+            }
+
+            return supported;
+        }
+        catch (Exception e)
+        {
+            supportedCurveIDs[namedCurve] = Boolean.valueOf(false);
+
+            return false;
+        }
+    }
+
     JceTlsSecret adoptLocalSecret(byte[] data)
     {
         return new JceTlsSecret(this, data);
+    }
+
+    Cipher createRSAEncryptionCipher() throws GeneralSecurityException
+    {
+        try
+        {
+            return getHelper().createCipher("RSA/NONE/PKCS1Padding");
+        }
+        catch (GeneralSecurityException e)
+        {
+            return getHelper().createCipher("RSA/ECB/PKCS1Padding");    // try old style
+        }
     }
 
     public byte[] createNonce(int size)
@@ -142,6 +195,16 @@ public class JcaTlsCrypto
             case EncryptionAlgorithm.AES_256_OCB_TAGLEN96:
                 // NOTE: Ignores macAlgorithm
                 return createCipher_AES_OCB(cryptoParams, 32, 12);
+            case EncryptionAlgorithm.ARIA_128_CBC:
+                return createARIACipher(cryptoParams, 16, macAlgorithm);
+            case EncryptionAlgorithm.ARIA_128_GCM:
+                // NOTE: Ignores macAlgorithm
+                return createCipher_ARIA_GCM(cryptoParams, 16, 16);
+            case EncryptionAlgorithm.ARIA_256_CBC:
+                return createARIACipher(cryptoParams, 32, macAlgorithm);
+            case EncryptionAlgorithm.ARIA_256_GCM:
+                // NOTE: Ignores macAlgorithm
+                return createCipher_ARIA_GCM(cryptoParams, 32, 16);
             case EncryptionAlgorithm.CAMELLIA_128_CBC:
                 return createCamelliaCipher(cryptoParams, 16, macAlgorithm);
             case EncryptionAlgorithm.CAMELLIA_128_GCM:
@@ -274,21 +337,65 @@ public class JcaTlsCrypto
         };
     }
 
+    public boolean hasAllRawSignatureAlgorithms()
+    {
+        return !JcaUtils.isSunMSCAPIProviderActive();
+    }
+
+    public boolean hasDHAgreement()
+    {
+        return true;
+    }
+
+    public boolean hasECDHAgreement()
+    {
+        return true;
+    }
+
     public boolean hasEncryptionAlgorithm(int encryptionAlgorithm)
     {
-        if (encryptionAlgorithm == EncryptionAlgorithm.CHACHA20_POLY1305)
+        try
         {
-            try
+            switch (encryptionAlgorithm)
+            {
+            case EncryptionAlgorithm.CHACHA20_POLY1305:
             {
                 helper.createCipher("ChaCha7539");
                 helper.createMac("Poly1305");
+                break;
             }
-            catch (GeneralSecurityException e)
+            case EncryptionAlgorithm.AES_128_CCM:
+            case EncryptionAlgorithm.AES_128_CCM_8:
+            case EncryptionAlgorithm.AES_256_CCM:
+            case EncryptionAlgorithm.AES_256_CCM_8:
             {
-                return false;
+                helper.createCipher("AES/CCM/NoPadding");
+                break;
+            }
+            case EncryptionAlgorithm.AES_128_GCM:
+            case EncryptionAlgorithm.AES_256_GCM:
+            {
+                helper.createCipher("AES/GCM/NoPadding");
+                break;
+            }
+            case EncryptionAlgorithm.ARIA_128_GCM:
+            case EncryptionAlgorithm.ARIA_256_GCM:
+            {
+                helper.createCipher("ARIA/GCM/NoPadding");
+                break;
+            }
+            case EncryptionAlgorithm.CAMELLIA_128_GCM:
+            case EncryptionAlgorithm.CAMELLIA_256_GCM:
+            {
+                helper.createCipher("CAMELLIA/GCM/NoPadding");
+                break;
+            }
             }
         }
-
+        catch (GeneralSecurityException e)
+        {
+            return false;
+        }
         return true;
     }
 
@@ -304,15 +411,46 @@ public class JcaTlsCrypto
         return true;
     }
 
-    public boolean hasSignatureAndHashAlgorithm(SignatureAndHashAlgorithm sigAndHashAlgorithm)
+    public boolean hasNamedCurve(int curveID)
+    {
+        return checkCurve(curveID);
+    }
+
+    public boolean hasRSAEncryption()
+    {
+        try
+        {
+            createRSAEncryptionCipher();
+            return true;
+        }
+        catch (GeneralSecurityException e)
+        {
+            return false;
+        }
+    }
+
+    public boolean hasSignatureAlgorithm(int signatureAlgorithm)
     {
         // TODO: expand
         return true;
     }
 
-    public boolean hasRSAEncryption()
+    public boolean hasSignatureAndHashAlgorithm(SignatureAndHashAlgorithm sigAndHashAlgorithm)
     {
+        /*
+         * This is somewhat overkill, but much simpler for now. It's also consistent with SunJSSE behaviour.
+         */
+        if (sigAndHashAlgorithm.getHash() == HashAlgorithm.sha224 && JcaUtils.isSunMSCAPIProviderActive())
+        {
+            return false;
+        }
+
         // TODO: expand
+        return true;
+    }
+
+    public boolean hasSRPAuthentication()
+    {
         return true;
     }
 
@@ -387,9 +525,9 @@ public class JcaTlsCrypto
             {
                 try
                 {
-                    Cipher encoding = getHelper().createCipher("RSA/NONE/PKCS1Padding");
-                    encoding.init(Cipher.WRAP_MODE, pubKeyRSA, getSecureRandom());
-                    return encoding.doFinal(input, inOff, length);
+                    Cipher c = createRSAEncryptionCipher();
+                    c.init(Cipher.ENCRYPT_MODE, pubKeyRSA, getSecureRandom());
+                    return c.doFinal(input, inOff, length);
                 }
                 catch (GeneralSecurityException e)
                 {
@@ -531,6 +669,13 @@ public class JcaTlsCrypto
             createMAC(cryptoParams, macAlgorithm), createMAC(cryptoParams, macAlgorithm), cipherKeySize);
     }
 
+    private TlsBlockCipher createARIACipher(TlsCryptoParameters cryptoParams, int cipherKeySize, int macAlgorithm)
+        throws IOException, GeneralSecurityException
+    {
+        return new TlsBlockCipher(this, cryptoParams, createCBCBlockOperator(cryptoParams, "ARIA", true, cipherKeySize), createCBCBlockOperator(cryptoParams, "ARIA", false, cipherKeySize),
+            createMAC(cryptoParams, macAlgorithm), createMAC(cryptoParams, macAlgorithm), cipherKeySize);
+    }
+
     private TlsBlockCipher createCamelliaCipher(TlsCryptoParameters cryptoParams, int cipherKeySize, int macAlgorithm)
         throws IOException, GeneralSecurityException
     {
@@ -607,6 +752,13 @@ public class JcaTlsCrypto
     {
         return new TlsAEADCipher(cryptoParams, createAEADCipher("AES/OCB/NoPadding", "AES", cipherKeySize, true), createAEADCipher("AES/OCB/NoPadding", "AES", cipherKeySize, false),
             cipherKeySize, macSize, TlsAEADCipher.NONCE_RFC7905);
+    }
+
+    private TlsAEADCipher createCipher_ARIA_GCM(TlsCryptoParameters cryptoParams, int cipherKeySize, int macSize)
+        throws IOException, GeneralSecurityException
+    {
+        return new TlsAEADCipher(cryptoParams, createAEADCipher("ARIA/GCM/NoPadding", "ARIA", cipherKeySize, true), createAEADCipher("ARIA/GCM/NoPadding", "ARIA", cipherKeySize, false),
+            cipherKeySize, macSize);
     }
 
     private TlsAEADCipher createCipher_Camellia_GCM(TlsCryptoParameters cryptoParams, int cipherKeySize, int macSize)

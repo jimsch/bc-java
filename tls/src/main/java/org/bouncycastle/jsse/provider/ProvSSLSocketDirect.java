@@ -12,6 +12,7 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.X509TrustManager;
 
+import org.bouncycastle.jsse.BCSSLConnection;
 import org.bouncycastle.tls.TlsClientProtocol;
 import org.bouncycastle.tls.TlsProtocol;
 import org.bouncycastle.tls.TlsServerProtocol;
@@ -33,7 +34,7 @@ class ProvSSLSocketDirect
     protected boolean initialHandshakeBegun = false;
     protected TlsProtocol protocol = null;
     protected ProvTlsPeer protocolPeer = null;
-    protected SSLSession session = ProvSSLSession.NULL_SESSION;
+    protected BCSSLConnection connection = null;
     protected SSLSession handshakeSession = null;
 
     protected ProvSSLSocketDirect(ProvSSLContextSpi context, ContextData contextData)
@@ -103,6 +104,20 @@ class ProvSSLSocketDirect
         super.close();
     }
 
+    public synchronized BCSSLConnection getConnection()
+    {
+        try
+        {
+            handshakeIfNecessary();
+        }
+        catch (Exception e)
+        {
+            // TODO[jsse] Logging?
+        }
+
+        return connection;
+    }
+
     @Override
     public synchronized String[] getEnabledCipherSuites()
     {
@@ -148,20 +163,9 @@ class ProvSSLSocketDirect
     @Override
     public synchronized SSLSession getSession()
     {
-        /*
-         * "This method will initiate the initial handshake if necessary and then block until the
-         * handshake has been established."
-         */
-        try
-        {
-            handshakeIfNecessary();
-        }
-        catch (Exception e)
-        {
-            // TODO[jsse] Logging?
-        }
+        BCSSLConnection connection = getConnection();
 
-        return session;
+        return connection == null ? ProvSSLSession.NULL_SESSION : connection.getSession();
     }
 
     @Override
@@ -298,6 +302,21 @@ class ProvSSLSocketDirect
         }
     }
 
+    public String getPeerHost()
+    {
+        InetAddress peerAddress = getInetAddress();
+        if (peerAddress != null)
+        {
+            String peerHost = peerAddress.toString();
+            int pos = peerHost.lastIndexOf('/');
+            if (pos > 0)
+            {
+                return peerHost.substring(0,  pos);
+            }
+        }
+        return null;
+    }
+
     public boolean isClientTrusted(X509Certificate[] chain, String authType)
     {
         // TODO[jsse] Consider X509ExtendedTrustManager and/or HostnameVerifier functionality
@@ -336,9 +355,9 @@ class ProvSSLSocketDirect
         return false;
     }
 
-    public synchronized void notifyHandshakeComplete(SSLSession session)
+    public synchronized void notifyHandshakeComplete(ProvSSLConnection connection)
     {
-        this.session = session;
+        this.connection = connection;
     }
 
     synchronized void handshakeIfNecessary() throws IOException

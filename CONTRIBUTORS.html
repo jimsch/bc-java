@@ -6,12 +6,17 @@ Thanks, may your castles never deflate!
 <p>
 Donors
 <p>
+The following people and organisations donated financially to help with the release of 1.57:
+<br />
+Joop Kaashoek and Pexus LLC.
+</p>
+<p>
+We also wish to acknowledge financial and collaborative support from <a href="https://www.cisco.com/">CISCO</a> and additional financial support from <a href="https://www.primekey.com/">PrimeKey</a> towards developing the EST API for RFC 7030 support.
+</p>
+<p>
 The following people and organisations donated financially to help with the release of 1.56:
 <br />
 DidiSoft, Cotiviti, Atanas Krachev, Encryptomatic LLC, LogicalAnswersIncSupporter
-</p>
-<p>
-We also wish to acknowledge financial support from the <a href="https://www.coreinfrastructure.org/">Core Infrastructure Initiative</a> towards developing the TLS API and JSSE provider.
 </p>
 <p>
 The following people and organisations donated financially to help with the release of 1.55:
@@ -40,7 +45,7 @@ Gup & Boz @ Alki Seattle, Bytemine Gmbh, Ted Pennings, Atanas Krachev, PrimeKey 
 <p>
 Organisations
 <ul>
-<li>Holders of <a href="http://www.cryptoworkshop.com">Crypto Workshop Support Contracts</a>. Without the consulting time left over from support contracts being contributed back to working on the Bouncy Castle APIs, progress would be impossible. You know who you are!</li>
+<li>Holders of <a href="https://www.cryptoworkshop.com">Crypto Workshop Support Contracts</a>. Without the consulting time left over from support contracts being contributed back to working on the Bouncy Castle APIs, progress would be impossible. You know who you are!</li>
 <li><a href="http://www.atlassian.com/">Atlassian Software Systems</a> donation of Confluence and JIRA licences.</li>
 <li><a href="http://www.grierforensics.com/">Grier Forensics</a>, for collaborating in the development of the S/MIME Toolkit and DANE SMIMEA functionality.</li>
 <li>TU-Darmstadt, Computer Science Department, RBG, for the initial
@@ -56,7 +61,9 @@ by the Theoretical Computer Science Research Group at TU-Darmstadt, Computer Sci
 <li>Voxeo Labs - sponsorship of the initial development of APIs for DTLS 1.0 (RFC 4347), DTLS-SRTP key negotiation (RFC 5764),
 and server side TLS 1.1 (RFC 4346) and tested WebRTC compatibility. More information on Voxeo Labs can be found
 at <a href="http://voxeolabs.com">http://voxeolabs.com</a></li>
+<li><a href="https://www.coreinfrastructure.org/">Core Infrastructure Initiative</a> - financial support towards developing the TLS API and JSSE provider that appeared in 1.56.</li>
 </ul>
+</p>
 People
 <ul>
 <li>Tito Pena &lt;Fortunato.Pena&#064;AdNovum.CH&gt; - initial RC5 implementation</li>
@@ -426,10 +433,20 @@ CertPath support for implicit DSA parameters and a range of NameConstraints. Add
 <li>Andrey Vasilyev&lt;https://github.com/andrey-vasilyev&gt; Initial implementation of GOST R 34.11-2012.</li>
 <li>William Glanton &lt;wglanton77&#064gmail.com&gt; Fixed bug in Poly1305 [#BJA-620].</li>
 <li>jdvorak001&lt;https://github.com/jdvorak001&gt; Speed improvements for ASN.1 ObjectIdentifier cache.</li>
-<li>Joseph Naegele &lt;jnaegele@grierforensics.com&gt; Patch for handling multiple certificates in a DANE SMIMEA entry.</li>
+<li>Joseph Naegele &lt;jnaegele&#064grierforensics.com&gt; Patch for handling multiple certificates in a DANE SMIMEA entry.</li>
 <li>Andrew Bonventre&lt;https://github.com/andybons&gt; NullPointer patch for WNafUtil.</li>
 <li>The Google Security Team (Project Wycheproof) &lt;https://github.com/google/wycheproof&gt; defect analysis and additional test cases for the provider.</li>
-<li>The Intel Security Team &lt;&gt; analysis detecting the issue with AESFastEngine (CVE-2016-1000339), additional suggestions for improvement to hardening of AESEngine.</li>
+<li>Gorka Irazoqui &lt;girazoki&#064wpi.edu&gt; from Intel Security Center of Excellence &lt;https://security-center.intel.com/&gt; detection of the issue with AESFastEngine (CVE-2016-1000339), additional suggestions for improvement to hardening of AESEngine.</li>
+<li>Joerg Senekowitsch &lt;joerg.senekowitsch&#064veridos.com&gt; patch to deal with hard coded boolean in EAC ECDSAPublicKey.</li>
+<li>Alexandr Krivoshta &lt;wipe&#064ya.ru&gt; N4 calculation fix to GOFB mode.</li>
+<li>Artem Storozhuk &lt;storojs72&#064gmail.com&gt; N4 calculation fix to GOFB mode.</li>
+<li>Na Yu &lt;na.yu&#064samsung.com&gt; Constructor patches to CMC PKIData.</li>
+<li>Evangelos Karatsiolis &lt;ekaratsiolis&#064mtg.de&gt; Corrected use of explicit tagging in X.509 PolicyConstraints class.</li>
+<li>VivleSoren &lt;https://github.com/VivleSoren&gt; additional constructor for McElieceCCA2PrivateKeyParameters.</li>
+<li>mtausig &lt;https://github.com/mtausig&gt; JavaDoc fix for MCSEncryptedDataGenerator.</li>
+<li>Anders Schack-Mulligen &lt;https://github.com/aschackmull&gt; code cleanups for CMSSignedDataParser, BrokenKDF2BytesGenerator.</li>
+<li>Sebastian Wolfgang Roland &lt;sebastianwolfgang.roland&#064stud.tu-darmstadt.de&gt; Initial XMSS implementation.</li>
+<li>didisoft &lt;https://github.com/didisoft&gt; test code for PGP signature removal involving user ids.</li>
 </ul>
 </body>
 </html>

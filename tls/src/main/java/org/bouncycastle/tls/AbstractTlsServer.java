@@ -2,7 +2,6 @@ package org.bouncycastle.tls;
 
 import java.io.IOException;
 import java.util.Hashtable;
-import java.util.Set;
 import java.util.Vector;
 
 import org.bouncycastle.tls.crypto.DHGroup;
@@ -14,6 +13,9 @@ import org.bouncycastle.tls.crypto.TlsDHConfig;
 import org.bouncycastle.tls.crypto.TlsECConfig;
 import org.bouncycastle.util.Arrays;
 
+/**
+ * Base class for a TLS client.
+ */
 public abstract class AbstractTlsServer
     extends AbstractTlsPeer
     implements TlsServer
@@ -108,6 +110,20 @@ public abstract class AbstractTlsServer
             maxBits = Math.max(maxBits, NamedCurve.getCurveBits(namedCurves[i]));
         }
         return maxBits;
+    }
+
+    protected boolean isSelectableCipherSuite(int cipherSuite, int availCurveBits, Vector sigAlgs)
+    {
+        return Arrays.contains(this.offeredCipherSuites, cipherSuite)
+            && TlsUtils.isValidCipherSuiteForVersion(cipherSuite, serverVersion)
+            && availCurveBits >= TlsECCUtils.getMinimumCurveBits(cipherSuite)
+            && TlsUtils.isValidCipherSuiteForSignatureAlgorithms(cipherSuite, sigAlgs);
+    }
+
+    protected boolean selectCipherSuite(int cipherSuite) throws IOException
+    {
+        this.selectedCipherSuite = cipherSuite;
+        return true;
     }
 
     protected int selectCurve(int minimumCurveBits)
@@ -228,10 +244,8 @@ public abstract class AbstractTlsServer
                     throw new TlsFatalAlert(AlertDescription.illegal_parameter);
                 }
             }
-            // TODO: restrict curve set using NamedCurve.FIPS if FIPS mode turned on.
-            Set<Integer> acceptedCurves = NamedCurve.ALL;
 
-            this.namedCurves = TlsECCUtils.getSupportedEllipticCurvesExtension(clientExtensions, acceptedCurves);
+            this.namedCurves = TlsECCUtils.getSupportedEllipticCurvesExtension(clientExtensions);
             this.clientECPointFormats = TlsECCUtils.getSupportedPointFormatsExtension(clientExtensions);
         }
 
@@ -271,14 +285,12 @@ public abstract class AbstractTlsServer
         throws IOException
     {
         /*
-         * TODO[tls-ops] Expedite the TODO below. Additionally, the signature algorithms need to be
-         * first pruned based on the signing credentials that are actually available.
-         * 
-         * TODO RFC 5246 7.4.3. In order to negotiate correctly, the server MUST check any candidate
+         * RFC 5246 7.4.3. In order to negotiate correctly, the server MUST check any candidate
          * cipher suites against the "signature_algorithms" extension before selecting them. This is
          * somewhat inelegant but is a compromise designed to minimize changes to the original
          * cipher suite design.
          */
+        Vector sigAlgs = TlsUtils.getUsableSignatureAlgorithms(supportedSignatureAlgorithms);
 
         /*
          * RFC 4429 5.1. A server that receives a ClientHello containing one or both of these
@@ -293,12 +305,10 @@ public abstract class AbstractTlsServer
         for (int i = 0; i < cipherSuites.length; ++i)
         {
             int cipherSuite = cipherSuites[i];
-
-            if (Arrays.contains(this.offeredCipherSuites, cipherSuite)
-                && TlsUtils.isValidCipherSuiteForVersion(cipherSuite, serverVersion)
-                && availCurveBits >= TlsECCUtils.getMinimumCurveBits(cipherSuite))
+            if (isSelectableCipherSuite(cipherSuite, availCurveBits, sigAlgs)
+                && selectCipherSuite(cipherSuite))
             {
-                return this.selectedCipherSuite = cipherSuite;
+                return cipherSuite;
             }
         }
         throw new TlsFatalAlert(AlertDescription.handshake_failure);

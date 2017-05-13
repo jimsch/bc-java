@@ -106,6 +106,7 @@
                 <javac source="${bc.javac.source}" target="${bc.javac.target}"
                     srcdir="${artifacts.dir}/@{target}/src"
                     destdir="${build.dir}/@{target}/classes"
+                    memoryMaximumSize="512m"
                     debug="${release.debug}" fork="true">
                     <classpath>
                         <path refid="project.classpath" /> 
@@ -142,6 +143,7 @@
                 <javac source="${bc.javac.source}" target="${bc.javac.target}"
                     srcdir="${artifacts.dir}/@{target}/src"
                     destdir="${build.dir}/@{target}/classes"
+                    memoryMaximumSize="512m"
                     debug="${release.debug}">
                     <classpath>
                         <path refid="project.classpath" /> 
@@ -279,6 +281,8 @@
         <javac source="${bc.javac.source}" target="${bc.javac.target}"
             srcdir="${lcrypto.target.src.dir}"
             destdir="${lcrypto.target.classes.dir}"
+	    memoryMaximumSize="512m"
+            fork="true"
             debug="${release.debug}">
             <classpath>
                 <path refid="project.classpath" /> 
@@ -317,6 +321,8 @@
                  <exclude name="org/bouncycastle/pkix/**" />
                  <exclude name="org/bouncycastle/dvcs/**" />
                  <exclude name="org/bouncycastle/eac/**" />
+                 <exclude name="org/bouncycastle/est/**" />
+                 <exclude name="org/bouncycastle/cmc/**" />
                  <exclude name="org/bouncycastle/mail/**" />
                  <exclude name="org/bouncycastle/openpgp/**" />
                  <exclude name="org/bouncycastle/openssl/**" />
@@ -428,6 +434,8 @@
                  <exclude name="org/bouncycastle/pkix/**" />
                  <exclude name="org/bouncycastle/dvcs/**" />
                  <exclude name="org/bouncycastle/eac/**" />
+                 <exclude name="org/bouncycastle/est/**" />
+                 <exclude name="org/bouncycastle/cmc/**" />
                  <exclude name="org/bouncycastle/cert/**" />
                  <exclude name="org/bouncycastle/pkcs/**" />
                  <exclude name="org/bouncycastle/operator/**" />
@@ -595,6 +603,8 @@
                  <include name="org/bouncycastle/pkix/**/*.java" />
                  <include name="org/bouncycastle/dvcs/**/*.java" />
                  <include name="org/bouncycastle/eac/**/*.java" />
+                 <include name="org/bouncycastle/est/**" />
+                 <include name="org/bouncycastle/cmc/**" />
                  <include name="org/bouncycastle/cert/**/*.java" />
                  <include name="org/bouncycastle/mozilla/**/*.java" />
                  <include name="org/bouncycastle/openssl/**/*.java" />
@@ -955,6 +965,8 @@
                  <include name="org/bouncycastle/pkix/**/test/*.java" />
                  <include name="org/bouncycastle/dvcs/**/test/*.java" />
                  <include name="org/bouncycastle/eac/**/test/*.java" />
+                 <include name="org/bouncycastle/est/**/test/*.java" />
+                 <include name="org/bouncycastle/cmc/**/test/*.java" />
                  <include name="org/bouncycastle/cert/**/test/*.java" />
                  <include name="org/bouncycastle/pkcs/**/test/*.java" />
                  <include name="org/bouncycastle/openssl/**/test/*.java" />
@@ -964,6 +976,8 @@
                  <include name="org/bouncycastle/pkix/**/*.html" />
                  <include name="org/bouncycastle/dvcs/**/*.html" />
                  <include name="org/bouncycastle/eac/**/*.html" />
+                 <include name="org/bouncycastle/est/**/*.html" />
+                 <include name="org/bouncycastle/cmc/**/*.html" />
                  <include name="org/bouncycastle/cert/**/*.html" />
                  <include name="org/bouncycastle/pkcs/**/*.html" />
                  <include name="org/bouncycastle/openssl/**/*.html" />
@@ -979,6 +993,7 @@
                 <package name="org.bouncycastle.cms.*" />
                 <package name="org.bouncycastle.dvcs.*" />
                 <package name="org.bouncycastle.eac.*" />
+                <package name="org.bouncycastle.est.*" />
                 <package name="org.bouncycastle.cert.*" />
                 <package name="org.bouncycastle.pkcs.*" />
                 <package name="org.bouncycastle.openssl.*" />
@@ -989,12 +1004,13 @@
                 <group title="Certificate Packages" packages="org.bouncycastle.cert*,org.bouncycastle.mozilla*" />
                 <group title="Cryptographic Operators" packages="org.bouncycastle.operator*" />
                 <group title="CMS Packages" packages="org.bouncycastle.cms*" />
+                <group title="EST Packages" packages="org.bouncycastle.est*" />
                 <group title="DVCS Packages" packages="org.bouncycastle.dvcs*" />
                 <group title="Extended Access Control Packages" packages="org.bouncycastle.eac*" />
                 <group title="PKCS Packages" packages="org.bouncycastle.pkcs*" />
                 <group title="OpenSSL and PEM Support Packages" packages="org.bouncycastle.openssl*" />
                 <group title="TSP Packages" packages="org.bouncycastle.tsp*" />
-                <group title="Test and Example Packages" packages="org.bouncycastle.openssl.test*,org.bouncycastle.mozilla.test*,org.bouncycastle.pkcs.test*,org.bouncycastle.cert.test*,org.bouncycastle.cert.path.test*,org.bouncycastle.cert.ocsp.test*,org.bouncycastle.cert.crmf.test*,org.bouncycastle.cert.cmp.test*,org.bouncycastle.eac.test*,org.bouncycastle.dvcs.test*,org.bouncycastle.cms.test*,org.bouncycastle.tsp.test*" />
+                <group title="Test and Example Packages" packages="org.bouncycastle.openssl.test*,org.bouncycastle.mozilla.test*,org.bouncycastle.pkcs.test*,org.bouncycastle.cert.test*,org.bouncycastle.cert.path.test*,org.bouncycastle.cert.ocsp.test*,org.bouncycastle.cert.crmf.test*,org.bouncycastle.cert.cmp.test*,org.bouncycastle.eac.test*,org.bouncycastle.dvcs.test*,org.bouncycastle.est.test*,org.bouncycastle.cms.test*,org.bouncycastle.tsp.test*,org.bouncycastle.operator.test*" />
             </docElements>
         </compile-doc>
 

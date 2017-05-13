@@ -6,6 +6,7 @@ import java.security.Provider;
 import java.security.PublicKey;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Iterator;
 
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
@@ -42,7 +43,7 @@ import org.bouncycastle.jcajce.provider.util.AsymmetricKeyInfoConverter;
 public final class BouncyCastleProvider extends Provider
     implements ConfigurableProvider
 {
-    private static String info = "BouncyCastle Security Provider v1.56";
+    private static String info = "BouncyCastle Security Provider v1.57";
 
     public static final String PROVIDER_NAME = "BC";
 
@@ -116,7 +117,7 @@ public final class BouncyCastleProvider extends Provider
      */
     public BouncyCastleProvider()
     {
-        super(PROVIDER_NAME, 1.56, info);
+        super(PROVIDER_NAME, 1.57, info);
 
         setup();
     }
@@ -216,6 +217,21 @@ public final class BouncyCastleProvider extends Provider
                         + packageName + names[i] + "$Mappings : " + e);
                 }
             }
+        }
+    }
+
+    public void addAttributes(String key, Map attributeMap)
+    {
+        for (Iterator it = attributeMap.keySet().iterator(); it.hasNext();)
+        {
+            String attributeName = (String)it.next();
+            String attributeKey = key + " " + attributeName;
+            if (containsKey(attributeKey))
+            {
+                throw new IllegalStateException("duplicate provider attribute key (" + attributeKey + ") found");
+            }
+
+            put(attributeKey, attributeMap.get(attributeName));
         }
     }
 

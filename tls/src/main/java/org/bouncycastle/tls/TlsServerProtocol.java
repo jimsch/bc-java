@@ -6,7 +6,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Vector;
 
-import org.bouncycastle.tls.crypto.TlsVerifier;
 import org.bouncycastle.util.Arrays;
 
 public class TlsServerProtocol
@@ -113,11 +112,9 @@ public class TlsServerProtocol
         return tlsServer;
     }
 
-    protected void handleHandshakeMessage(short type, byte[] data)
+    protected void handleHandshakeMessage(short type, ByteArrayInputStream buf)
         throws IOException
     {
-        ByteArrayInputStream buf = new ByteArrayInputStream(data);
-
         switch (type)
         {
         case HandshakeType.client_hello:
@@ -216,7 +213,8 @@ public class TlsServerProtocol
                 sendServerHelloDoneMessage();
                 this.connection_state = CS_SERVER_HELLO_DONE;
 
-                this.recordStream.getHandshakeHash().sealHashAlgorithms();
+                boolean forceBuffering = false;
+                TlsUtils.sealHandshakeHash(getContext(), this.recordStream.getHandshakeHash(), forceBuffering);
 
                 break;
             }
@@ -373,7 +371,6 @@ public class TlsServerProtocol
 
                 sendFinishedMessage();
                 this.connection_state = CS_SERVER_FINISHED;
-                this.connection_state = CS_END;
 
                 completeHandshake();
                 break;
@@ -448,8 +445,7 @@ public class TlsServerProtocol
              * issued by one of the listed CAs.
              */
 
-            this.clientCertificateType = TlsUtils.getClientCertificateType(getContext(), clientCertificate,
-                this.serverCredentials.getCertificate());
+            this.clientCertificateType = clientCertificate.getCertificateAt(0).getClientCertificateType();
 
             this.keyExchange.processClientCertificate(clientCertificate);
         }
@@ -483,42 +479,13 @@ public class TlsServerProtocol
             throw new IllegalStateException();
         }
 
-        DigitallySigned clientCertificateVerify = DigitallySigned.parse(getContext(), buf);
+        TlsContext context = getContext();
+        DigitallySigned clientCertificateVerify = DigitallySigned.parse(context, buf);
 
         assertEmpty(buf);
 
-        // Verify the CertificateVerify message contains a correct signature.
-        try
-        {
-            SignatureAndHashAlgorithm signatureAlgorithm = clientCertificateVerify.getAlgorithm();
-
-            byte[] hash;
-            if (TlsUtils.isTLSv12(getContext()))
-            {
-                TlsUtils.verifySupportedSignatureAlgorithm(certificateRequest.getSupportedSignatureAlgorithms(), signatureAlgorithm);
-                hash = prepareFinishHash.getFinalHash(signatureAlgorithm.getHash());
-            }
-            else
-            {
-                hash = securityParameters.getSessionHash();
-            }
-
-            TlsVerifier verifier = peerCertificate.getCertificateAt(0)
-                .createVerifier(TlsUtils.getSignatureAlgorithmClient(clientCertificateType));
-
-            if (!verifier.verifySignature(clientCertificateVerify, hash))
-            {
-                throw new TlsFatalAlert(AlertDescription.decrypt_error);
-            }
-        }
-        catch (TlsFatalAlert e)
-        {
-            throw e;
-        }
-        catch (Exception e)
-        {
-            throw new TlsFatalAlert(AlertDescription.decrypt_error, e);
-        }
+        TlsUtils.verifyCertificateVerify(context, certificateRequest, peerCertificate, clientCertificateType,
+            clientCertificateVerify, prepareFinishHash);
     }
 
     protected void receiveClientHelloMessage(ByteArrayInputStream buf)
@@ -657,7 +624,7 @@ public class TlsServerProtocol
         }
 
         this.prepareFinishHash = recordStream.prepareToFinish();
-        this.securityParameters.sessionHash = getCurrentPRFHash(getContext(), prepareFinishHash, null);
+        this.securityParameters.sessionHash = TlsUtils.getCurrentPRFHash(prepareFinishHash);
 
         if (!TlsUtils.isSSL(getContext()))
         {
@@ -823,7 +790,7 @@ public class TlsServerProtocol
         securityParameters.prfAlgorithm = getPRFAlgorithm(getContext(), securityParameters.getCipherSuite());
 
         /*
-         * RFC 5264 7.4.9. Any cipher suite which does not explicitly specify verify_data_length has
+         * RFC 5246 7.4.9. Any cipher suite which does not explicitly specify verify_data_length has
          * a verify_data_length equal to 12. This includes all existing cipher suites.
          */
         securityParameters.verifyDataLength = 12;

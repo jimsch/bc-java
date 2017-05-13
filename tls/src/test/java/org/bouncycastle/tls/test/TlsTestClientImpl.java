@@ -15,6 +15,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.tls.AlertDescription;
 import org.bouncycastle.tls.AlertLevel;
 import org.bouncycastle.tls.CertificateRequest;
+import org.bouncycastle.tls.ChannelBinding;
 import org.bouncycastle.tls.ClientCertificateType;
 import org.bouncycastle.tls.ConnectionEnd;
 import org.bouncycastle.tls.DefaultTlsClient;
@@ -28,9 +29,11 @@ import org.bouncycastle.tls.TlsFatalAlert;
 import org.bouncycastle.tls.TlsUtils;
 import org.bouncycastle.tls.crypto.TlsCertificate;
 import org.bouncycastle.tls.crypto.TlsCrypto;
+import org.bouncycastle.tls.crypto.TlsStreamSigner;
 import org.bouncycastle.tls.crypto.impl.bc.BcTlsCrypto;
 import org.bouncycastle.tls.crypto.impl.jcajce.JcaTlsCryptoProvider;
 import org.bouncycastle.util.Arrays;
+import org.bouncycastle.util.encoders.Hex;
 
 class TlsTestClientImpl
     extends DefaultTlsClient
@@ -39,6 +42,8 @@ class TlsTestClientImpl
 
     protected int firstFatalAlertConnectionEnd = -1;
     protected short firstFatalAlertDescription = -1;
+
+    byte[] tlsUnique = null;
 
     TlsTestClientImpl(TlsTestConfig config)
     {
@@ -144,6 +149,18 @@ class TlsTestClientImpl
         }
     }
 
+    public void notifyHandshakeComplete() throws IOException
+    {
+        super.notifyHandshakeComplete();
+
+        tlsUnique = context.exportChannelBinding(ChannelBinding.tls_unique);
+
+        if (TlsTestConfig.DEBUG)
+        {
+            System.out.println("TLS client reports 'tls-unique' = " + Hex.toHexString(tlsUnique));
+        }
+    }
+
     public void notifyServerVersion(ProtocolVersion serverVersion) throws IOException
     {
         super.notifyServerVersion(serverVersion);
@@ -246,6 +263,11 @@ class TlsTestClientImpl
                     public SignatureAndHashAlgorithm getSignatureAndHashAlgorithm()
                     {
                         return signerCredentials.getSignatureAndHashAlgorithm();
+                    }
+
+                    public TlsStreamSigner getStreamSigner() throws IOException
+                    {
+                        return null;
                     }
                 };
             }

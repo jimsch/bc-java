@@ -7,6 +7,7 @@ import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.Vector;
 
 import javax.security.auth.x500.X500Principal;
 
@@ -15,9 +16,13 @@ import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.jcajce.util.DefaultJcaJceHelper;
 import org.bouncycastle.jcajce.util.JcaJceHelper;
 import org.bouncycastle.tls.AlertDescription;
+import org.bouncycastle.tls.AlertLevel;
 import org.bouncycastle.tls.Certificate;
 import org.bouncycastle.tls.ClientCertificateType;
+import org.bouncycastle.tls.HashAlgorithm;
 import org.bouncycastle.tls.KeyExchangeAlgorithm;
+import org.bouncycastle.tls.SignatureAlgorithm;
+import org.bouncycastle.tls.SignatureAndHashAlgorithm;
 import org.bouncycastle.tls.TlsFatalAlert;
 import org.bouncycastle.tls.crypto.TlsCertificate;
 import org.bouncycastle.tls.crypto.TlsCrypto;
@@ -39,7 +44,25 @@ class JsseUtils
         return false;
     }
 
-    public static String getAuthType(int keyExchangeAlgorithm) throws IOException
+    public static String getAuthTypeClient(short clientCertificateType) throws IOException
+    {
+        switch (clientCertificateType)
+        {
+        case ClientCertificateType.dss_sign:
+            return "DSA";
+        case ClientCertificateType.ecdsa_sign:
+            return "EC";
+        case ClientCertificateType.rsa_sign:
+            return "RSA";
+
+        // TODO[jsse] "fixed" types and any others
+
+        default:
+            throw new TlsFatalAlert(AlertDescription.internal_error);
+        }
+    }
+
+    public static String getAuthTypeServer(int keyExchangeAlgorithm) throws IOException
     {
         switch (keyExchangeAlgorithm)
         {
@@ -106,25 +129,6 @@ class JsseUtils
         return new Certificate(certificateList);
     }
 
-    public static String getClientAuthType(short clientCertificateType) throws IOException
-    {
-        switch (clientCertificateType)
-        {
-        case ClientCertificateType.dss_sign:
-            return "DSA";
-        case ClientCertificateType.ecdsa_sign:
-            // TODO[jsse] Seems to be what SunJSSE forwards to KeyManager.chooseClientAlias
-            return "EC";
-        case ClientCertificateType.rsa_sign:
-            return "RSA";
-
-        // TODO[jsse] "fixed" types and any others
-
-        default:
-            throw new TlsFatalAlert(AlertDescription.internal_error);
-        }
-    }
-
     public static X509Certificate[] getX509CertificateChain(Certificate certificateMessage)
     {
         if (certificateMessage == null || certificateMessage.isEmpty())
@@ -151,6 +155,29 @@ class JsseUtils
         }
     }
 
+    public static X509Certificate[] getX509CertificateChain(java.security.cert.Certificate[] chain)
+    {
+        if (chain == null)
+        {
+            return null;
+        }
+        if (chain instanceof X509Certificate[])
+        {
+            return (X509Certificate[])chain;
+        }
+        X509Certificate[] x509Chain = new X509Certificate[chain.length];
+        for (int i = 0; i < chain.length; ++i)
+        {
+            java.security.cert.Certificate c = chain[i];
+            if (!(c instanceof X509Certificate))
+            {
+                return null;
+            }
+            x509Chain[i] = (X509Certificate)c;
+        }
+        return x509Chain;
+    }
+
     public static X500Principal getSubject(Certificate certificateMessage)
     {
         if (certificateMessage == null || certificateMessage.isEmpty())
@@ -171,6 +198,32 @@ class JsseUtils
             // TODO[jsse] Logging
             throw new RuntimeException(e);
         }
+    }
+
+    static String getAlertLogMessage(String root, short alertLevel, short alertDescription)
+    {
+        return root + " " + AlertLevel.getText(alertLevel) + " " + AlertDescription.getText(alertDescription) + " alert";
+    }
+
+    static Vector getSupportedSignatureAlgorithms(TlsCrypto crypto)
+    {
+        short[] hashAlgorithms = new short[]{ HashAlgorithm.sha1, HashAlgorithm.sha224, HashAlgorithm.sha256,
+            HashAlgorithm.sha384, HashAlgorithm.sha512 };
+        short[] signatureAlgorithms = new short[]{ SignatureAlgorithm.rsa, SignatureAlgorithm.ecdsa };
+
+        Vector result = new Vector();
+        for (int i = 0; i < signatureAlgorithms.length; ++i)
+        {
+            for (int j = 0; j < hashAlgorithms.length; ++j)
+            {
+                addIfSupported(crypto, result, new SignatureAndHashAlgorithm(hashAlgorithms[j], signatureAlgorithms[i]));
+            }
+        }
+
+        // TODO Dynamically detect whether the TlsCrypto implementation can handle DSA2
+        addIfSupported(crypto, result, new SignatureAndHashAlgorithm(HashAlgorithm.sha1, SignatureAlgorithm.dsa));
+
+        return result;
     }
 
     static Set<X500Principal> toX500Principals(X500Name[] names) throws IOException
@@ -194,6 +247,23 @@ class JsseUtils
         return principals;
     }
 
+    static X500Name toX500Name(Principal principal)
+    {
+        if (principal == null)
+        {
+            return null;
+        }
+        else if (principal instanceof X500Principal)
+        {
+            return X500Name.getInstance(((X500Principal)principal).getEncoded());
+        }
+        else
+        {
+            // TODO[jsse] Should we really be trying to support these?
+            return new X500Name(principal.getName());       // hope for the best
+        }
+    }
+
     static Set<X500Name> toX500Names(Principal[] principals)
     {
         if (principals == null || principals.length == 0)
@@ -205,18 +275,21 @@ class JsseUtils
 
         for (int i = 0; i != principals.length; i++)
         {
-            Principal principal = principals[i];
-            if (principal instanceof X500Principal)
+            X500Name name = toX500Name(principals[i]);
+            if (name != null)
             {
-                names.add(X500Name.getInstance(((X500Principal)principal).getEncoded()));
-            }
-            else if (principal != null)
-            {
-            	// TODO[jsse] Should we really be trying to support these?
-                names.add(new X500Name(principal.getName()));       // hope for the best
+                names.add(name);
             }
         }
 
         return names;
+    }
+
+    private static void addIfSupported(TlsCrypto crypto, Vector v, SignatureAndHashAlgorithm alg)
+    {
+        if (crypto.hasSignatureAndHashAlgorithm(alg))
+        {
+            v.addElement(alg);
+        }
     }
 }

@@ -49,27 +49,30 @@ public class BasicTlsTest
             this.latch = new CountDownLatch(1);
         }
 
-        public Object call()
+        public Exception call()
             throws Exception
         {
-            TrustManagerFactory trustMgrFact = TrustManagerFactory.getInstance("X509",
-                BouncyCastleJsseProvider.PROVIDER_NAME);
+            try
+            {
+                TrustManagerFactory trustMgrFact = TrustManagerFactory.getInstance("PKIX",
+                    BouncyCastleJsseProvider.PROVIDER_NAME);
+    
+                trustMgrFact.init(trustStore);
+    
+                SSLContext clientContext = SSLContext.getInstance("TLS", BouncyCastleJsseProvider.PROVIDER_NAME);
+    
+                clientContext.init(null, trustMgrFact.getTrustManagers(),
+                    SecureRandom.getInstance("DEFAULT", BouncyCastleProvider.PROVIDER_NAME));
+    
+                SSLSocketFactory fact = clientContext.getSocketFactory();
+                SSLSocket cSock = (SSLSocket)fact.createSocket(HOST, PORT_NO);
 
-            trustMgrFact.init(trustStore);
-
-            SSLContext clientContext = SSLContext.getInstance("TLS", BouncyCastleJsseProvider.PROVIDER_NAME);
-
-            clientContext.init(null, trustMgrFact.getTrustManagers(),
-                SecureRandom.getInstance("DEFAULT", BouncyCastleProvider.PROVIDER_NAME));
-
-            SSLSocketFactory fact = clientContext.getSocketFactory();
-            SSLSocket cSock = (SSLSocket)fact.createSocket(HOST, PORT_NO);
-
-            SSLUtils.restrictKeyExchange(cSock, "ECDHE_ECDSA");
-
-            TestProtocolUtil.doClientProtocol(cSock, "Hello");
-
-            latch.countDown();
+                TestProtocolUtil.doClientProtocol(cSock, "Hello");
+            }
+            finally
+            {
+                latch.countDown();
+            }
 
             return null;
         }
@@ -95,30 +98,40 @@ public class BasicTlsTest
             this.latch = new CountDownLatch(1);
         }
 
-        public Object call()
+        public Exception call()
             throws Exception
         {
-            KeyManagerFactory keyMgrFact = KeyManagerFactory.getInstance("X509",
-                BouncyCastleJsseProvider.PROVIDER_NAME);
-
-            keyMgrFact.init(serverStore, keyPass);
-
-            SSLContext serverContext = SSLContext.getInstance("TLS", BouncyCastleJsseProvider.PROVIDER_NAME);
-
-            serverContext.init(keyMgrFact.getKeyManagers(), null,
-                SecureRandom.getInstance("DEFAULT", BouncyCastleProvider.PROVIDER_NAME));
-
-            SSLServerSocketFactory fact = serverContext.getServerSocketFactory();
-            SSLServerSocket sSock = (SSLServerSocket)fact.createServerSocket(PORT_NO);
-
-            SSLUtils.enableAll(sSock);
-
-            latch.countDown();
-
-            SSLSocket sslSock = (SSLSocket)sSock.accept();
-            sslSock.setUseClientMode(false);
-
-            TestProtocolUtil.doServerProtocol(sslSock, "World");
+            try
+            {
+                KeyManagerFactory keyMgrFact = KeyManagerFactory.getInstance("PKIX",
+                    BouncyCastleJsseProvider.PROVIDER_NAME);
+    
+                keyMgrFact.init(serverStore, keyPass);
+    
+                SSLContext serverContext = SSLContext.getInstance("TLS", BouncyCastleJsseProvider.PROVIDER_NAME);
+    
+                serverContext.init(keyMgrFact.getKeyManagers(), null,
+                    SecureRandom.getInstance("DEFAULT", BouncyCastleProvider.PROVIDER_NAME));
+    
+                SSLServerSocketFactory fact = serverContext.getServerSocketFactory();
+                SSLServerSocket sSock = (SSLServerSocket)fact.createServerSocket(PORT_NO);
+    
+                SSLUtils.enableAll(sSock);
+    
+                latch.countDown();
+    
+                SSLSocket sslSock = (SSLSocket)sSock.accept();
+                sslSock.setUseClientMode(false);
+    
+                TestProtocolUtil.doServerProtocol(sslSock, "World");
+                
+                sslSock.close();
+                sSock.close();
+            }
+            finally
+            {
+                latch.countDown();
+            }
 
             return null;
         }
@@ -148,5 +161,32 @@ public class BasicTlsTest
         ts.setCertificateEntry("ca", caCert);
 
         TestProtocolUtil.runClientAndServer(new SimpleServer(ks, keyPass), new SimpleClient(ts));
+    }
+
+    public void testNullRandomJsseInit()
+        throws Exception
+    {
+        char[] keyPass = "keyPassword".toCharArray();
+
+        KeyPair caKeyPair = TestUtils.generateECKeyPair();
+
+        X509Certificate caCert = TestUtils.generateRootCert(caKeyPair);
+
+        KeyStore ks = KeyStore.getInstance("JKS");
+        ks.load(null, null);
+        ks.setKeyEntry("server", caKeyPair.getPrivate(), keyPass, new X509Certificate[]{ caCert });
+
+        KeyStore ts = KeyStore.getInstance("JKS");
+        ts.load(null, null);
+        ts.setCertificateEntry("ca", caCert);
+
+        TrustManagerFactory trustMgrFact = TrustManagerFactory.getInstance("PKIX",
+            BouncyCastleJsseProvider.PROVIDER_NAME);
+
+        trustMgrFact.init(ts);
+
+        SSLContext clientContext = SSLContext.getInstance("TLS", BouncyCastleJsseProvider.PROVIDER_NAME);
+
+        clientContext.init(null, trustMgrFact.getTrustManagers(), null);
     }
 }

@@ -8,6 +8,9 @@ import org.bouncycastle.tls.crypto.TlsCipher;
 import org.bouncycastle.tls.crypto.TlsCrypto;
 import org.bouncycastle.tls.crypto.TlsCryptoParameters;
 
+/**
+ * Base class for a TLS client.
+ */
 public abstract class AbstractTlsClient
     extends AbstractTlsPeer
     implements TlsClient
@@ -46,8 +49,7 @@ public abstract class AbstractTlsClient
              * Supported Elliptic Curves Extension is clearly intended to be client-only. If
              * present, we still require that it is a valid EllipticCurveList.
              */
-            // TODO: restrict curve set using NamedCurve.FIPS if FIPS mode turned on.
-            TlsECCUtils.readSupportedEllipticCurvesExtension(extensionData, NamedCurve.ALL);
+            TlsECCUtils.readSupportedEllipticCurvesExtension(extensionData);
             return true;
         default:
             return false;
@@ -68,6 +70,11 @@ public abstract class AbstractTlsClient
     {
         int minimumCurveBits = TlsECCUtils.getMinimumCurveBits(selectedCipherSuite);
         return new DefaultTlsECConfigVerifier(minimumCurveBits, namedCurves);
+    }
+
+    protected Vector getSupportedSignatureAlgorithms()
+    {
+        return TlsUtils.getDefaultSupportedSignatureAlgorithms(context);
     }
 
     public void init(TlsClientContext context)
@@ -120,9 +127,7 @@ public abstract class AbstractTlsClient
          */
         if (TlsUtils.isSignatureAlgorithmsExtensionAllowed(clientVersion))
         {
-            // TODO Provide a way for the user to specify the acceptable hash/signature algorithms.
-
-            this.supportedSignatureAlgorithms = TlsUtils.getDefaultSupportedSignatureAlgorithms();
+            this.supportedSignatureAlgorithms = getSupportedSignatureAlgorithms();
 
             clientExtensions = TlsExtensionsUtils.ensureExtensionsInitialised(clientExtensions);
 
