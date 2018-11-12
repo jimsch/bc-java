@@ -43,7 +43,7 @@ import org.bouncycastle.jcajce.provider.util.AsymmetricKeyInfoConverter;
 public final class BouncyCastleProvider extends Provider
     implements ConfigurableProvider
 {
-    private static String info = "BouncyCastle Security Provider v1.57";
+    private static String info = "BouncyCastle Security Provider v1.60";
 
     public static final String PROVIDER_NAME = "BC";
 
@@ -58,20 +58,20 @@ public final class BouncyCastleProvider extends Provider
 
     private static final String[] SYMMETRIC_GENERIC =
     {
-        "PBEPBKDF2", "PBEPKCS12"
+        "PBEPBKDF1", "PBEPBKDF2", "PBEPKCS12", "TLSKDF", "SCRYPT"
     };
 
     private static final String[] SYMMETRIC_MACS =
     {
-        "SipHash"
+        "SipHash", "Poly1305"
     };
 
     private static final String[] SYMMETRIC_CIPHERS =
     {
-        "AES", "ARC4", "Blowfish", "Camellia", "CAST5", "CAST6", "ChaCha", "DES", "DESede",
+        "AES", "ARC4", "ARIA", "Blowfish", "Camellia", "CAST5", "CAST6", "ChaCha", "DES", "DESede",
         "GOST28147", "Grainv1", "Grain128", "HC128", "HC256", "IDEA", "Noekeon", "RC2", "RC5",
         "RC6", "Rijndael", "Salsa20", "SEED", "Serpent", "Shacal2", "Skipjack", "SM4", "TEA", "Twofish", "Threefish",
-        "VMPC", "VMPCKSA3", "XTEA", "XSalsa20", "OpenSSLPBKDF"
+        "VMPC", "VMPCKSA3", "XTEA", "XSalsa20", "OpenSSLPBKDF", "DSTU7624", "GOST3412_2015"
     };
 
      /*
@@ -88,7 +88,7 @@ public final class BouncyCastleProvider extends Provider
 
     private static final String[] ASYMMETRIC_CIPHERS =
     {
-        "DSA", "DH", "EC", "RSA", "GOST", "ECGOST", "ElGamal", "DSTU4145"
+        "DSA", "DH", "EC", "RSA", "GOST", "ECGOST", "ElGamal", "DSTU4145", "GM"
     };
 
     /*
@@ -98,7 +98,7 @@ public final class BouncyCastleProvider extends Provider
     private static final String[] DIGESTS =
     {
         "GOST3411", "Keccak", "MD2", "MD4", "MD5", "SHA1", "RIPEMD128", "RIPEMD160", "RIPEMD256", "RIPEMD320", "SHA224",
-        "SHA256", "SHA384", "SHA512", "SHA3", "Skein", "SM3", "Tiger", "Whirlpool", "Blake2b"
+        "SHA256", "SHA384", "SHA512", "SHA3", "Skein", "SM3", "Tiger", "Whirlpool", "Blake2b", "Blake2s", "DSTU7564"
     };
 
     /*
@@ -107,7 +107,7 @@ public final class BouncyCastleProvider extends Provider
     private static final String KEYSTORE_PACKAGE = "org.bouncycastle.jcajce.provider.keystore.";
     private static final String[] KEYSTORES =
     {
-        "BC", "PKCS12"
+        "BC", "BCFKS", "PKCS12"
     };
 
     /**
@@ -117,7 +117,7 @@ public final class BouncyCastleProvider extends Provider
      */
     public BouncyCastleProvider()
     {
-        super(PROVIDER_NAME, 1.57, info);
+        super(PROVIDER_NAME, 1.60, info);
 
         setup();
     }

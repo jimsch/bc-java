@@ -42,11 +42,6 @@ public final class ProtocolVersion
         return getMajorVersion() == 0xFE;
     }
 
-    public boolean isSSL()
-    {
-        return getFullVersion() == SSLv3.getFullVersion();
-    }
-
     public boolean isTLS()
     {
         return getMajorVersion() == 0x03;
@@ -157,7 +152,7 @@ public final class ProtocolVersion
         }
         default:
         {
-            throw new TlsFatalAlert(AlertDescription.illegal_parameter);
+            return getUnknownVersion(major, minor, "UNKNOWN");
         }
         }
     }

@@ -40,6 +40,7 @@ import org.bouncycastle.jce.spec.ECPrivateKeySpec;
 import org.bouncycastle.math.ec.ECCurve;
 import org.bouncycastle.math.ec.ECPoint;
 import org.bouncycastle.util.Strings;
+import org.bouncycastle.jcajce.provider.asymmetric.util.ECUtil;
 
 public class BCECPrivateKey
     implements ECPrivateKey, PKCS12BagAttributeCarrier, ECPointEncoder
@@ -136,6 +137,7 @@ public class BCECPrivateKey
     BCECPrivateKey(
         PrivateKeyInfo      info,
         ProviderConfiguration configuration)
+        throws IOException
     {
         this.configuration = configuration;
 
@@ -146,6 +148,7 @@ public class BCECPrivateKey
         String              algorithm,
         PrivateKeyInfo      info,
         ProviderConfiguration configuration)
+        throws IOException
     {
         this.configuration = configuration;
         populateFromPrivKeyInfo(info);
@@ -153,8 +156,9 @@ public class BCECPrivateKey
     }
 
     private void populateFromPrivKeyInfo(PrivateKeyInfo info)
+        throws IOException
     {
-        X962Parameters      params = X962Parameters.getInstance(info.getAlgorithmId().getParameters());
+        X962Parameters      params = X962Parameters.getInstance(info.getPrivateKeyAlgorithm().getParameters());
 
         if (params.isNamedCurve())
         {
@@ -183,15 +187,15 @@ public class BCECPrivateKey
                                             ecP.getSeed());
         }
 
-        if (info.getPrivateKey() instanceof ASN1Integer)
+        if (info.parsePrivateKey() instanceof ASN1Integer)
         {
-            ASN1Integer          derD = ASN1Integer.getInstance(info.getPrivateKey());
+            ASN1Integer          derD = ASN1Integer.getInstance(info.parsePrivateKey());
 
             this.d = derD.getValue();
         }
         else
         {
-            ECPrivateKeyStructure   ec = new ECPrivateKeyStructure((ASN1Sequence)info.getPrivateKey());
+            ECPrivateKeyStructure   ec = new ECPrivateKeyStructure(ASN1Sequence.getInstance(info.parsePrivateKey()));
 
             this.d = ec.getKey();
             this.publicKey = ec.getPublicKey();
@@ -303,6 +307,11 @@ public class BCECPrivateKey
         }
 
         return BouncyCastleProvider.CONFIGURATION.getEcImplicitlyCa();
+    }
+
+    public String toString()
+    {
+        return ECUtil.privateKeyToString("EC", d, engineGetSpec());
     }
 
     public boolean equals(Object o)

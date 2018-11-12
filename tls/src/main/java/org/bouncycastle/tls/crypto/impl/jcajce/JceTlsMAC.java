@@ -23,15 +23,15 @@ public class JceTlsMAC
         this.algorithm = algorithm;
     }
 
-    public void setKey(byte[] key)
+    public void setKey(byte[] key, int keyOff, int keyLen)
     {
         try
         {
-            mac.init(new SecretKeySpec(key, algorithm));
+            mac.init(new SecretKeySpec(key, keyOff, keyLen, algorithm));
         }
         catch (InvalidKeyException e)
         {
-            e.printStackTrace();
+            throw new IllegalArgumentException(e.getMessage());
         }
     }
 

@@ -1,5 +1,6 @@
 package org.bouncycastle.jsse.provider;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.SocketException;
@@ -12,12 +13,21 @@ import java.util.Set;
 import javax.net.ssl.HandshakeCompletedListener;
 import javax.net.ssl.SSLSocket;
 
+import org.bouncycastle.jsse.BCSSLConnection;
 import org.bouncycastle.jsse.BCSSLSocket;
 
 abstract class ProvSSLSocketBase
     extends SSLSocket
     implements BCSSLSocket
 {
+    protected final Closeable socketCloser = new Closeable()
+    {
+        public void close() throws IOException
+        {
+            closeSocket();
+        }
+    };
+
     protected final Set<HandshakeCompletedListenerAdapter> listeners = Collections.synchronizedSet(
         new HashSet<HandshakeCompletedListenerAdapter>());
 
@@ -57,6 +67,19 @@ abstract class ProvSSLSocketBase
         }
 
         listeners.add(new HandshakeCompletedListenerAdapter(listener));
+    }
+
+    protected void closeSocket() throws IOException
+    {
+        super.close();
+    }
+
+    // @Override from JDK 9
+    public String getApplicationProtocol()
+    {
+        BCSSLConnection connection = getConnection();
+
+        return connection == null ? null : connection.getApplicationProtocol();
     }
 
     @Override
@@ -99,4 +122,23 @@ abstract class ProvSSLSocketBase
             throw new UnsupportedOperationException("Urgent data not supported in TLS");
         }
     }
+    
+    @Override
+    public void shutdownInput() throws IOException
+    {
+        throw new UnsupportedOperationException("shutdownInput() not supported in TLS");
+    }
+
+    @Override
+    public void shutdownOutput() throws IOException
+    {
+        throw new UnsupportedOperationException("shutdownOutput() not supported in TLS");
+    }
+
+    // TODO[jsse] Proper toString for sockets
+//    @Override
+//    public String toString()
+//    {
+//        return super.toString();
+//    }
 }

@@ -5,6 +5,7 @@ import java.util.Vector;
 import org.bouncycastle.tls.ConnectionEnd;
 import org.bouncycastle.tls.ProtocolVersion;
 import org.bouncycastle.tls.SignatureAndHashAlgorithm;
+import org.bouncycastle.tls.TlsPeer;
 
 public class TlsTestConfig
 {
@@ -66,6 +67,11 @@ public class TlsTestConfig
      */
     public SignatureAndHashAlgorithm clientAuthSigAlgClaimed = null;
 
+    /**
+     * Control the result the client will return from {@link TlsPeer#shouldCheckSigAlgOfPeerCerts()}.
+     */
+    public boolean clientCheckSigAlgOfServerCerts = true;
+
     public int clientCrypto = CRYPTO_BC;
 
     /**
@@ -104,6 +110,11 @@ public class TlsTestConfig
      * CertificateRequest (if one is sent). If null, uses a default set.
      */
     public Vector serverCertReqSigAlgs = null;
+
+    /**
+     * Control the result the server will return from {@link TlsPeer#shouldCheckSigAlgOfPeerCerts()}.
+     */
+    public boolean serverCheckSigAlgOfClientCerts = true;
 
     public int serverCrypto = CRYPTO_BC;
 

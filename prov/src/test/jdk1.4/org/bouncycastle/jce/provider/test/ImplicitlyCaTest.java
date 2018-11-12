@@ -112,12 +112,12 @@ public class ImplicitlyCaTest
 
         if (!vKey.equals(vKey2) || vKey.hashCode() != vKey2.hashCode())
         {
-            fail("private equals/hashCode failed");
+            fail("testKeyFactory public equals/hashCode failed");
         }
 
         if (!sKey.equals(sKey2) || sKey.hashCode() != sKey2.hashCode())
         {
-            fail("private equals/hashCode failed");
+            fail("testKeyFactory private equals/hashCode failed");
         }
     }
 
@@ -158,7 +158,7 @@ public class ImplicitlyCaTest
 
         PrivateKeyInfo sInfo = PrivateKeyInfo.getInstance(new ASN1InputStream(bytes).readObject());
 
-        if (!sInfo.getAlgorithmId().getParameters().equals(DERNull.INSTANCE))
+        if (!sInfo.getPrivateKeyAlgorithm().getParameters().equals(DERNull.INSTANCE))
         {
             fail("private key parameters wrong");
         }
@@ -167,19 +167,19 @@ public class ImplicitlyCaTest
 
         if (!sKey.equals(privKey))
         {
-            fail("private equals failed");
+            fail("testEncoding private equals failed");
         }
 
         if (sKey.hashCode() != privKey.hashCode())
         {
-            fail("private hashCode failed");
+            fail("testEncoding private hashCode failed");
         }
 
         bytes = pubKey.getEncoded();
 
         SubjectPublicKeyInfo vInfo = SubjectPublicKeyInfo.getInstance(new ASN1InputStream(bytes).readObject());
 
-        if (!vInfo.getAlgorithmId().getParameters().equals(DERNull.INSTANCE))
+        if (!vInfo.getAlgorithm().getParameters().equals(DERNull.INSTANCE))
         {
             fail("public key parameters wrong");
         }
@@ -188,7 +188,7 @@ public class ImplicitlyCaTest
 
         if (!vKey.equals(pubKey) || vKey.hashCode() != pubKey.hashCode())
         {
-            fail("public equals/hashCode failed");
+            fail("testEncoding public equals/hashCode failed");
         }
 
         testBCParamsAndQ(sKey, vKey);

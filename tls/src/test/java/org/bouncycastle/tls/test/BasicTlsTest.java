@@ -6,29 +6,37 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.Socket;
 import java.security.SecureRandom;
+import java.util.Vector;
 
-import junit.framework.TestCase;
-import junit.framework.TestSuite;
 import org.bouncycastle.tls.AlertDescription;
 import org.bouncycastle.tls.AlertLevel;
 import org.bouncycastle.tls.Certificate;
 import org.bouncycastle.tls.CipherSuite;
 import org.bouncycastle.tls.DefaultTlsClient;
+import org.bouncycastle.tls.HashAlgorithm;
+import org.bouncycastle.tls.TlsPeerOptions;
 import org.bouncycastle.tls.ProtocolVersion;
 import org.bouncycastle.tls.SecurityParameters;
 import org.bouncycastle.tls.ServerOnlyTlsAuthentication;
+import org.bouncycastle.tls.SignatureAlgorithm;
+import org.bouncycastle.tls.SignatureAndHashAlgorithm;
 import org.bouncycastle.tls.TlsAuthentication;
 import org.bouncycastle.tls.TlsClient;
 import org.bouncycastle.tls.TlsClientContext;
 import org.bouncycastle.tls.TlsClientProtocol;
 import org.bouncycastle.tls.TlsFatalAlert;
 import org.bouncycastle.tls.TlsKeyExchange;
+import org.bouncycastle.tls.TlsServerCertificate;
 import org.bouncycastle.tls.TlsSession;
 import org.bouncycastle.tls.crypto.TlsCertificate;
 import org.bouncycastle.tls.crypto.TlsCrypto;
+import org.bouncycastle.tls.crypto.TlsNonceGenerator;
 import org.bouncycastle.tls.crypto.impl.bc.BcTlsCrypto;
 import org.bouncycastle.util.Arrays;
 import org.bouncycastle.util.encoders.Hex;
+
+import junit.framework.TestCase;
+import junit.framework.TestSuite;
 
 public class BasicTlsTest
     extends TestCase
@@ -101,7 +109,7 @@ public class BasicTlsTest
         TlsClientProtocol protocol = new TlsClientProtocol(s.getInputStream(), s.getOutputStream());
         protocol.connect(new MyTlsClient(new ServerOnlyTlsAuthentication()
         {
-            public void notifyServerCertificate(Certificate serverCertificate) throws IOException
+            public void notifyServerCertificate(TlsServerCertificate serverCertificate) throws IOException
             {
                 // NOTE: In production code this MUST verify the certificate!
             }
@@ -156,13 +164,13 @@ public class BasicTlsTest
 
         try
         {
-            checkConnectionClient(client, CipherSuite.TLS_DH_anon_EXPORT_WITH_DES40_CBC_SHA, TlsTestUtils.rsaCertData);
+            checkConnectionClient(client, CipherSuite.TLS_DH_anon_WITH_AES_128_CBC_SHA, TlsTestUtils.rsaCertData);
 
             fail("wrong certificate not caught");
         }
         catch (TlsFatalAlert e)
         {
-            assertEquals(AlertDescription.internal_error, e.getAlertDescription());
+            assertEquals(AlertDescription.unexpected_message, e.getAlertDescription());
         }
     }
 
@@ -222,6 +230,11 @@ public class BasicTlsTest
             super(new BcTlsCrypto(new SecureRandom()));
 
             this.authentication = authentication;
+
+            this.supportedSignatureAlgorithms = new Vector();
+            this.supportedSignatureAlgorithms.addElement(new SignatureAndHashAlgorithm(HashAlgorithm.md5, SignatureAlgorithm.rsa));
+            this.supportedSignatureAlgorithms.addElement(new SignatureAndHashAlgorithm(HashAlgorithm.sha1, SignatureAlgorithm.rsa));
+            this.supportedSignatureAlgorithms.addElement(new SignatureAndHashAlgorithm(HashAlgorithm.sha256, SignatureAlgorithm.rsa));
         }
 
         public TlsAuthentication getAuthentication()
@@ -234,6 +247,8 @@ public class BasicTlsTest
     static class MyTlsClientContext
         implements TlsClientContext
     {
+        TlsPeerOptions peerOptions = new TlsPeerOptions();
+
         TlsCrypto crypto;
 
         MyTlsClientContext(TlsCrypto crypto)
@@ -244,6 +259,16 @@ public class BasicTlsTest
         public TlsCrypto getCrypto()
         {
             return crypto;
+        }
+
+        public TlsNonceGenerator getNonceGenerator()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        public TlsPeerOptions getPeerOptions()
+        {
+            return peerOptions;
         }
 
         public SecureRandom getSecureRandom()

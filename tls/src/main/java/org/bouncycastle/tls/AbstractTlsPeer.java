@@ -22,6 +22,21 @@ public abstract class AbstractTlsPeer
         return crypto;
     }
 
+    public boolean requiresExtendedMasterSecret()
+    {
+        return false;
+    }
+
+    public boolean shouldCheckSigAlgOfPeerCerts()
+    {
+        return true;
+    }
+
+    public boolean shouldUseExtendedPadding()
+    {
+        return false;
+    }
+
     public boolean shouldUseGMTUnixTime()
     {
         /*

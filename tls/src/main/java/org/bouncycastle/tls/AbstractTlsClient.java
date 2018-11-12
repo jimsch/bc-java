@@ -19,12 +19,11 @@ public abstract class AbstractTlsClient
 
     protected TlsClientContext context;
 
+    protected Vector supportedGroups;
     protected Vector supportedSignatureAlgorithms;
-    protected int[] namedCurves;
     protected short[] clientECPointFormats, serverECPointFormats;
 
     protected int selectedCipherSuite;
-    protected short selectedCompressionMethod;
 
     public AbstractTlsClient(TlsCrypto crypto)
     {
@@ -49,11 +48,34 @@ public abstract class AbstractTlsClient
              * Supported Elliptic Curves Extension is clearly intended to be client-only. If
              * present, we still require that it is a valid EllipticCurveList.
              */
-            TlsECCUtils.readSupportedEllipticCurvesExtension(extensionData);
+            TlsExtensionsUtils.readSupportedGroupsExtension(extensionData);
             return true;
+
+        case ExtensionType.ec_point_formats:
+            /*
+             * Exception added based on field reports that some servers send this even when they
+             * didn't negotiate an ECC cipher suite. If present, we still require that it is a valid
+             * ECPointFormatList.
+             */
+            TlsECCUtils.readSupportedPointFormatsExtension(extensionData);
+            return true;
+
         default:
             return false;
         }
+    }
+
+    protected NamedGroupTypes getOfferingNamedGroupTypes()
+    {
+        int[] cipherSuites = getCipherSuites();
+
+        NamedGroupTypes offeringTypes = new NamedGroupTypes();
+        offeringTypes.setDH(TlsDHUtils.containsDHCipherSuites(cipherSuites));
+        offeringTypes.setECDH(TlsECCUtils.containsECDHCipherSuites(cipherSuites));
+        offeringTypes.setECDSA(TlsECCUtils.containsECDSACipherSuites(cipherSuites)
+            || (null == supportedSignatureAlgorithms)
+            || TlsUtils.containsAnySignatureAlgorithm(supportedSignatureAlgorithms, SignatureAlgorithm.ecdsa));
+        return offeringTypes;
     }
 
     protected void checkForUnexpectedServerExtension(Hashtable serverExtensions, Integer extensionType)
@@ -69,7 +91,61 @@ public abstract class AbstractTlsClient
     protected TlsECConfigVerifier createECConfigVerifier()
     {
         int minimumCurveBits = TlsECCUtils.getMinimumCurveBits(selectedCipherSuite);
-        return new DefaultTlsECConfigVerifier(minimumCurveBits, namedCurves);
+        return new DefaultTlsECConfigVerifier(minimumCurveBits, supportedGroups);
+    }
+
+    protected Vector getProtocolNames()
+    {
+        return null;
+    }
+
+    protected CertificateStatusRequest getCertificateStatusRequest()
+    {
+        return new CertificateStatusRequest(CertificateStatusType.ocsp, new OCSPStatusRequest(null, null));
+    }
+
+    protected Vector getSNIServerNames()
+    {
+        return null;
+    }
+
+    protected short[] getSupportedPointFormats()
+    {
+        return new short[]{ ECPointFormat.uncompressed };
+    }
+
+    /**
+     * The default {@link #getClientExtensions()} implementation calls this to determine which named
+     * groups to include in the supported_groups extension for the ClientHello.
+     * 
+     * @param offeringTypes
+     *            The types of NamedGroup for which there should be at least one supported group. By
+     *            default this is inferred from the offered cipher suites and signature algorithms.
+     * @return a {@link Vector} of {@link Integer}. See {@link NamedGroup} for group constants.
+     */
+    protected Vector getSupportedGroups(NamedGroupTypes offeringTypes)
+    {
+        TlsCrypto crypto = getCrypto();
+        Vector supportedGroups = new Vector();
+
+        if (offeringTypes.hasECDH())
+        {
+            TlsUtils.addIfSupported(supportedGroups, crypto, NamedGroup.x25519);
+        }
+
+        if (offeringTypes.hasECDH() || offeringTypes.hasECDSA())
+        {
+            TlsUtils.addIfSupported(supportedGroups, crypto, new int[]{
+                NamedGroup.secp256r1, NamedGroup.secp384r1 });
+        }
+
+        if (offeringTypes.hasECDH())
+        {
+            TlsUtils.addIfSupported(supportedGroups, crypto, new int[]{
+                NamedGroup.ffdhe2048, NamedGroup.ffdhe3072, NamedGroup.ffdhe4096 });
+        }
+
+        return supportedGroups;
     }
 
     protected Vector getSupportedSignatureAlgorithms()
@@ -117,7 +193,27 @@ public abstract class AbstractTlsClient
     public Hashtable getClientExtensions()
         throws IOException
     {
-        Hashtable clientExtensions = null;
+        Hashtable clientExtensions = new Hashtable();
+
+        TlsExtensionsUtils.addEncryptThenMACExtension(clientExtensions);
+
+        Vector protocolNames = getProtocolNames();
+        if (protocolNames != null)
+        {
+            TlsExtensionsUtils.addALPNExtensionClient(clientExtensions, protocolNames);
+        }
+
+        Vector sniServerNames = getSNIServerNames();
+        if (sniServerNames != null)
+        {
+            TlsExtensionsUtils.addServerNameExtension(clientExtensions, new ServerNameList(sniServerNames));
+        }
+
+        CertificateStatusRequest statusRequest = getCertificateStatusRequest();
+        if (statusRequest != null)
+        {
+            TlsExtensionsUtils.addStatusRequestExtension(clientExtensions, statusRequest);
+        }
 
         ProtocolVersion clientVersion = context.getClientVersion();
 
@@ -129,30 +225,23 @@ public abstract class AbstractTlsClient
         {
             this.supportedSignatureAlgorithms = getSupportedSignatureAlgorithms();
 
-            clientExtensions = TlsExtensionsUtils.ensureExtensionsInitialised(clientExtensions);
-
             TlsUtils.addSignatureAlgorithmsExtension(clientExtensions, supportedSignatureAlgorithms);
         }
 
-        if (TlsECCUtils.containsECCipherSuites(getCipherSuites()))
+        NamedGroupTypes offeringTypes = getOfferingNamedGroupTypes();
+
+        Vector supportedGroups = getSupportedGroups(offeringTypes);
+        if (supportedGroups != null && !supportedGroups.isEmpty())
         {
-            /*
-             * RFC 4492 5.1. A client that proposes ECC cipher suites in its ClientHello message
-             * appends these extensions (along with any others), enumerating the curves it supports
-             * and the point formats it can parse. Clients SHOULD send both the Supported Elliptic
-             * Curves Extension and the Supported Point Formats Extension.
-             */
-            /*
-             * TODO Could just add all the curves since we support them all, but users may not want
-             * to use unnecessarily large fields. Need configuration options.
-             */
-            this.namedCurves = new int[]{ NamedCurve.secp256r1, NamedCurve.secp384r1 };
-            this.clientECPointFormats = new short[]{ ECPointFormat.uncompressed,
-                ECPointFormat.ansiX962_compressed_prime, ECPointFormat.ansiX962_compressed_char2, };
+            this.supportedGroups = supportedGroups;
 
-            clientExtensions = TlsExtensionsUtils.ensureExtensionsInitialised(clientExtensions);
+            TlsExtensionsUtils.addSupportedGroupsExtension(clientExtensions, supportedGroups);
+        }
 
-            TlsECCUtils.addSupportedEllipticCurvesExtension(clientExtensions, namedCurves);
+        if (offeringTypes.hasECDH() || offeringTypes.hasECDSA())
+        {
+            this.clientECPointFormats = getSupportedPointFormats();
+
             TlsECCUtils.addSupportedPointFormatsExtension(clientExtensions, clientECPointFormats);
         }
 
@@ -173,11 +262,6 @@ public abstract class AbstractTlsClient
         }
     }
 
-    public short[] getCompressionMethods()
-    {
-        return new short[]{CompressionMethod._null};
-    }
-
     public void notifySessionID(byte[] sessionID)
     {
         // Currently ignored
@@ -186,11 +270,6 @@ public abstract class AbstractTlsClient
     public void notifySelectedCipherSuite(int selectedCipherSuite)
     {
         this.selectedCipherSuite = selectedCipherSuite;
-    }
-
-    public void notifySelectedCompressionMethod(short selectedCompressionMethod)
-    {
-        this.selectedCompressionMethod = selectedCompressionMethod;
     }
 
     public void processServerExtensions(Hashtable serverExtensions)
@@ -207,7 +286,7 @@ public abstract class AbstractTlsClient
              */
             checkForUnexpectedServerExtension(serverExtensions, TlsUtils.EXT_signature_algorithms);
 
-            checkForUnexpectedServerExtension(serverExtensions, TlsECCUtils.EXT_elliptic_curves);
+            checkForUnexpectedServerExtension(serverExtensions, TlsExtensionsUtils.EXT_supported_groups);
 
             if (TlsECCUtils.isECCipherSuite(this.selectedCipherSuite))
             {
@@ -238,24 +317,6 @@ public abstract class AbstractTlsClient
         throws IOException
     {
         return null;
-    }
-
-    public TlsCompression getCompression()
-        throws IOException
-    {
-        switch (selectedCompressionMethod)
-        {
-        case CompressionMethod._null:
-            return new TlsNullCompression();
-
-        default:
-            /*
-             * Note: internal error here; the TlsProtocol implementation verifies that the
-             * server-selected compression method was in the list of client-offered compression
-             * methods, so if we now can't produce an implementation, we shouldn't have offered it!
-             */
-            throw new TlsFatalAlert(AlertDescription.internal_error);
-        }
     }
 
     public TlsCipher getCipher()

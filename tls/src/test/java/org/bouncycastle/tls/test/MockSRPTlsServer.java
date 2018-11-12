@@ -95,8 +95,7 @@ class MockSRPTlsServer
 
     protected TlsCredentialedSigner getRSASignerCredentials() throws IOException
     {
-        return TlsTestUtils.loadSignerCredentials(context, supportedSignatureAlgorithms, SignatureAlgorithm.rsa,
-            "x509-server.pem", "x509-server-key.pem");
+        return TlsTestUtils.loadSignerCredentialsServer(context, supportedSignatureAlgorithms, SignatureAlgorithm.rsa);
     }
 
     static class MyIdentityManager

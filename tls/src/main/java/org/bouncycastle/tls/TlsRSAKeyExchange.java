@@ -8,10 +8,9 @@ import java.util.Vector;
 import org.bouncycastle.tls.crypto.TlsCertificate;
 import org.bouncycastle.tls.crypto.TlsCryptoParameters;
 import org.bouncycastle.tls.crypto.TlsSecret;
-import org.bouncycastle.util.io.Streams;
 
 /**
- * (D)TLS and SSLv3 RSA key exchange.
+ * (D)TLS RSA key exchange.
  */
 public class TlsRSAKeyExchange
     extends AbstractTlsKeyExchange
@@ -34,52 +33,26 @@ public class TlsRSAKeyExchange
     public void processServerCredentials(TlsCredentials serverCredentials)
         throws IOException
     {
-        if (!(serverCredentials instanceof TlsCredentialedDecryptor))
-        {
-            throw new TlsFatalAlert(AlertDescription.internal_error);
-        }
-
-        this.serverCredentials = (TlsCredentialedDecryptor)serverCredentials;
+        this.serverCredentials = TlsUtils.requireDecryptorCredentials(serverCredentials);
     }
 
     public void processServerCertificate(Certificate serverCertificate)
         throws IOException
     {
-        if (serverCertificate.isEmpty())
-        {
-            throw new TlsFatalAlert(AlertDescription.bad_certificate);
-        }
-
-        checkServerCertSigAlg(serverCertificate);
-
-        this.serverCertificate = serverCertificate.getCertificateAt(0).useInRole(ConnectionEnd.server, keyExchange);
+        this.serverCertificate = checkSigAlgOfServerCerts(serverCertificate)
+            .useInRole(ConnectionEnd.server, keyExchange);
     }
 
-    public void validateCertificateRequest(CertificateRequest certificateRequest)
-        throws IOException
+    public short[] getClientCertificateTypes()
     {
-        short[] types = certificateRequest.getCertificateTypes();
-        for (int i = 0; i < types.length; ++i)
-        {
-            switch (types[i])
-            {
-            case ClientCertificateType.rsa_sign:
-            case ClientCertificateType.dss_sign:
-            case ClientCertificateType.ecdsa_sign:
-                break;
-            default:
-                throw new TlsFatalAlert(AlertDescription.illegal_parameter);
-            }
-        }
+        return new short[]{ ClientCertificateType.rsa_sign, ClientCertificateType.dss_sign,
+            ClientCertificateType.ecdsa_sign };
     }
 
     public void processClientCredentials(TlsCredentials clientCredentials)
         throws IOException
     {
-        if (!(clientCredentials instanceof TlsCredentialedSigner))
-        {
-            throw new TlsFatalAlert(AlertDescription.internal_error);
-        }
+        TlsUtils.requireSignerCredentials(clientCredentials);
     }
 
     public void generateClientKeyExchange(OutputStream output)
@@ -91,16 +64,7 @@ public class TlsRSAKeyExchange
     public void processClientKeyExchange(InputStream input)
         throws IOException
     {
-        byte[] encryptedPreMasterSecret;
-        if (TlsUtils.isSSL(context))
-        {
-            // TODO Do any SSLv3 clients actually include the length?
-            encryptedPreMasterSecret = Streams.readAll(input);
-        }
-        else
-        {
-            encryptedPreMasterSecret = TlsUtils.readOpaque16(input);
-        }
+        byte[] encryptedPreMasterSecret = TlsUtils.readOpaque16(input);
 
         this.preMasterSecret = serverCredentials.decrypt(new TlsCryptoParameters(context), encryptedPreMasterSecret);
     }

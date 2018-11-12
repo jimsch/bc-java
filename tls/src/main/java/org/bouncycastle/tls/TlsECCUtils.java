@@ -1,6 +1,5 @@
 package org.bouncycastle.tls;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -12,13 +11,7 @@ import org.bouncycastle.util.Integers;
 
 public class TlsECCUtils
 {
-    public static final Integer EXT_elliptic_curves = Integers.valueOf(ExtensionType.supported_groups);
     public static final Integer EXT_ec_point_formats = Integers.valueOf(ExtensionType.ec_point_formats);
-
-    public static void addSupportedEllipticCurvesExtension(Hashtable extensions, int[] namedCurves) throws IOException
-    {
-        extensions.put(EXT_elliptic_curves, createSupportedEllipticCurvesExtension(namedCurves));
-    }
 
     public static void addSupportedPointFormatsExtension(Hashtable extensions, short[] ecPointFormats)
         throws IOException
@@ -26,26 +19,10 @@ public class TlsECCUtils
         extensions.put(EXT_ec_point_formats, createSupportedPointFormatsExtension(ecPointFormats));
     }
 
-    public static int[] getSupportedEllipticCurvesExtension(Hashtable extensions) throws IOException
-    {
-        byte[] extensionData = TlsUtils.getExtensionData(extensions, EXT_elliptic_curves);
-        return extensionData == null ? null : readSupportedEllipticCurvesExtension(extensionData);
-    }
-
     public static short[] getSupportedPointFormatsExtension(Hashtable extensions) throws IOException
     {
         byte[] extensionData = TlsUtils.getExtensionData(extensions, EXT_ec_point_formats);
         return extensionData == null ? null : readSupportedPointFormatsExtension(extensionData);
-    }
-
-    public static byte[] createSupportedEllipticCurvesExtension(int[] namedCurves) throws IOException
-    {
-        if (namedCurves == null || namedCurves.length < 1)
-        {
-            throw new TlsFatalAlert(AlertDescription.internal_error);
-        }
-
-        return TlsUtils.encodeUint16ArrayWithUint16Length(namedCurves);
     }
 
     public static byte[] createSupportedPointFormatsExtension(short[] ecPointFormats) throws IOException
@@ -64,47 +41,9 @@ public class TlsECCUtils
         return TlsUtils.encodeUint8ArrayWithUint8Length(ecPointFormats);
     }
 
-    public static int[] readSupportedEllipticCurvesExtension(byte[] extensionData) throws IOException
-    {
-        if (extensionData == null)
-        {
-            throw new IllegalArgumentException("'extensionData' cannot be null");
-        }
-
-        ByteArrayInputStream buf = new ByteArrayInputStream(extensionData);
-
-        int length = TlsUtils.readUint16(buf);
-        if (length < 2 || (length & 1) != 0)
-        {
-            throw new TlsFatalAlert(AlertDescription.decode_error);
-        }
-
-        int[] namedCurves = TlsUtils.readUint16Array(length / 2, buf);
-
-        TlsProtocol.assertEmpty(buf);
-
-        return namedCurves;
-    }
-
     public static short[] readSupportedPointFormatsExtension(byte[] extensionData) throws IOException
     {
-        if (extensionData == null)
-        {
-            throw new IllegalArgumentException("'extensionData' cannot be null");
-        }
-
-        ByteArrayInputStream buf = new ByteArrayInputStream(extensionData);
-
-        short length = TlsUtils.readUint8(buf);
-        if (length < 1)
-        {
-            throw new TlsFatalAlert(AlertDescription.decode_error);
-        }
-
-        short[] ecPointFormats = TlsUtils.readUint8Array(length, buf);
-
-        TlsProtocol.assertEmpty(buf);
-
+        short[] ecPointFormats = TlsUtils.decodeUint8ArrayWithUint8Length(extensionData);
         if (!Arrays.contains(ecPointFormats, ECPointFormat.uncompressed))
         {
             /*
@@ -113,15 +52,46 @@ public class TlsECCUtils
              */
             throw new TlsFatalAlert(AlertDescription.illegal_parameter);
         }
-
         return ecPointFormats;
     }
 
+    /**
+     * @deprecated Will be removed.
+     */
     public static boolean containsECCipherSuites(int[] cipherSuites)
+    {
+        return containsECDHCipherSuites(cipherSuites);
+    }
+
+    public static boolean containsECDHCipherSuites(int[] cipherSuites)
     {
         for (int i = 0; i < cipherSuites.length; ++i)
         {
-            if (isECCipherSuite(cipherSuites[i]))
+            if (isECDHCipherSuite(cipherSuites[i]))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean containsECDHECipherSuites(int[] cipherSuites)
+    {
+        for (int i = 0; i < cipherSuites.length; ++i)
+        {
+            if (isECDHECipherSuite(cipherSuites[i]))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean containsECDSACipherSuites(int[] cipherSuites)
+    {
+        for (int i = 0; i < cipherSuites.length; ++i)
+        {
+            if (isECDSACipherSuite(cipherSuites[i]))
             {
                 return true;
             }
@@ -131,32 +101,23 @@ public class TlsECCUtils
 
     public static int getMinimumCurveBits(int cipherSuite)
     {
-        switch (cipherSuite)
-        {
-        case CipherSuite.DRAFT_TLS_ECDHE_PSK_WITH_AES_128_CCM_8_SHA256:
-        case CipherSuite.DRAFT_TLS_ECDHE_PSK_WITH_AES_128_CCM_SHA256:
-        case CipherSuite.DRAFT_TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256:
-            return 255;
-
-        case CipherSuite.DRAFT_TLS_ECDHE_PSK_WITH_AES_256_CCM_8_SHA256:
-        case CipherSuite.DRAFT_TLS_ECDHE_PSK_WITH_AES_256_CCM_SHA384:
-        case CipherSuite.DRAFT_TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384:
-            return 384;
-
-        default:
-        {
-            if (!isECCipherSuite(cipherSuite))
-            {
-                return 0;
-            }
-
-            // TODO Is there a de facto rule to require a curve of similar size to the PRF hash?
-            return 1;
-        }
-        }
+        /*
+         * NOTE: This mechanism was added to support a minimum bit-size requirement mooted in early
+         * drafts of RFC 8442. This requirement was removed in later drafts, so this mechanism is
+         * currently somewhat trivial.
+         */
+        return isECCipherSuite(cipherSuite) ? 1 : 0;
     }
 
+    /**
+     * @deprecated Will be removed.
+     */
     public static boolean isECCipherSuite(int cipherSuite)
+    {
+        return isECDHCipherSuite(cipherSuite);
+    }
+
+    public static boolean isECDHCipherSuite(int cipherSuite)
     {
         switch (TlsUtils.getKeyExchangeAlgorithm(cipherSuite))
         {
@@ -173,22 +134,64 @@ public class TlsECCUtils
         }
     }
 
-    public static short getCompressionFormat(int namedCurve) throws IOException
+    public static boolean isECDHECipherSuite(int cipherSuite)
     {
-        if (NamedCurve.isPrime(namedCurve))
+        switch (TlsUtils.getKeyExchangeAlgorithm(cipherSuite))
+        {
+        case KeyExchangeAlgorithm.ECDH_anon:
+        case KeyExchangeAlgorithm.ECDHE_ECDSA:
+        case KeyExchangeAlgorithm.ECDHE_PSK:
+        case KeyExchangeAlgorithm.ECDHE_RSA:
+            return true;
+            
+        default:
+            return false;
+        }
+    }
+
+    public static boolean isECDSACipherSuite(int cipherSuite)
+    {
+        switch (TlsUtils.getKeyExchangeAlgorithm(cipherSuite))
+        {
+        case KeyExchangeAlgorithm.ECDH_ECDSA:
+        case KeyExchangeAlgorithm.ECDHE_ECDSA:
+            return true;
+
+        default:
+            return false;
+        }
+    }
+
+    public static short getCompressionFormat(int namedGroup) throws IOException
+    {
+        switch (namedGroup)
+        {
+        case NamedGroup.x25519:
+        case NamedGroup.x448:
+            return ECPointFormat.uncompressed;
+        }
+
+        if (NamedGroup.isPrimeCurve(namedGroup))
         {
             return ECPointFormat.ansiX962_compressed_prime;
         }
-        if (NamedCurve.isChar2(namedCurve))
+        if (NamedGroup.isChar2Curve(namedGroup))
         {
             return ECPointFormat.ansiX962_compressed_char2;
         }
         throw new TlsFatalAlert(AlertDescription.illegal_parameter);
     }
 
-    public static boolean isCompressionPreferred(short[] peerECPointFormats, int namedCurve) throws IOException
+    public static boolean isCompressionPreferred(short[] peerECPointFormats, int namedGroup) throws IOException
     {
-        return isCompressionPreferred(peerECPointFormats, getCompressionFormat(namedCurve));
+        switch (namedGroup)
+        {
+        case NamedGroup.x25519:
+        case NamedGroup.x448:
+            return false;
+        default:
+            return isCompressionPreferred(peerECPointFormats, getCompressionFormat(namedGroup));
+        }
     }
 
     public static boolean isCompressionPreferred(short[] peerECPointFormats, short compressionFormat)
@@ -212,14 +215,14 @@ public class TlsECCUtils
         return false;
     }
 
-    public static void checkPointEncoding(short[] localECPointFormats, int namedCurve, byte[] encoding) throws IOException
+    public static void checkPointEncoding(short[] localECPointFormats, int namedGroup, byte[] encoding) throws IOException
     {
         if (encoding == null || encoding.length < 1)
         {
             throw new TlsFatalAlert(AlertDescription.illegal_parameter);
         }
 
-        short actualFormat = getActualFormat(namedCurve, encoding);
+        short actualFormat = getActualFormat(namedGroup, encoding);
         checkActualFormat(localECPointFormats, actualFormat);
     }
 
@@ -232,14 +235,21 @@ public class TlsECCUtils
         }
     }
 
-    public static short getActualFormat(int namedCurve, byte[] encoding) throws IOException
+    public static short getActualFormat(int namedGroup, byte[] encoding) throws IOException
     {
+        switch (namedGroup)
+        {
+        case NamedGroup.x25519:
+        case NamedGroup.x448:
+            return ECPointFormat.uncompressed;
+        }
+
         switch (encoding[0])
         {
         case 0x02: // compressed
         case 0x03: // compressed
         {
-            return getCompressionFormat(namedCurve);
+            return getCompressionFormat(namedGroup);
         }
         case 0x04: // uncompressed
         {
@@ -262,8 +272,8 @@ public class TlsECCUtils
             throw new TlsFatalAlert(AlertDescription.handshake_failure);
         }
 
-        int namedCurve = TlsUtils.readUint16(input);
-        if (!NamedCurve.refersToASpecificNamedCurve(namedCurve))
+        int namedGroup = TlsUtils.readUint16(input);
+        if (!NamedGroup.refersToASpecificCurve(namedGroup))
         {
             /*
              * RFC 4492 5.4. All those values of NamedCurve are allowed that refer to a
@@ -273,10 +283,10 @@ public class TlsECCUtils
             throw new TlsFatalAlert(AlertDescription.illegal_parameter);
         }
 
-        boolean compressed = isCompressionPreferred(peerECPointFormats, namedCurve);
+        boolean compressed = isCompressionPreferred(peerECPointFormats, namedGroup);
 
         TlsECConfig result = new TlsECConfig();
-        result.setNamedCurve(namedCurve);
+        result.setNamedGroup(namedGroup);
         result.setPointCompression(compressed);
         return result;
     }
@@ -294,12 +304,12 @@ public class TlsECCUtils
 
     public static void writeECConfig(TlsECConfig ecConfig, OutputStream output) throws IOException
     {
-        writeNamedECParameters(ecConfig.getNamedCurve(), output);
+        writeNamedECParameters(ecConfig.getNamedGroup(), output);
     }
 
-    public static void writeNamedECParameters(int namedCurve, OutputStream output) throws IOException
+    public static void writeNamedECParameters(int namedGroup, OutputStream output) throws IOException
     {
-        if (!NamedCurve.refersToASpecificNamedCurve(namedCurve))
+        if (!NamedGroup.refersToASpecificCurve(namedGroup))
         {
             /*
              * RFC 4492 5.4. All those values of NamedCurve are allowed that refer to a specific
@@ -310,7 +320,7 @@ public class TlsECCUtils
         }
 
         TlsUtils.writeUint8(ECCurveType.named_curve, output);
-        TlsUtils.checkUint16(namedCurve);
-        TlsUtils.writeUint16(namedCurve, output);
+        TlsUtils.checkUint16(namedGroup);
+        TlsUtils.writeUint16(namedGroup, output);
     }
 }

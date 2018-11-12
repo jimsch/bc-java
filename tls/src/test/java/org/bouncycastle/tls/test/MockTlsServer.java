@@ -5,6 +5,7 @@ import java.io.PrintStream;
 import java.security.SecureRandom;
 import java.util.Vector;
 
+import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.Certificate;
 import org.bouncycastle.tls.AlertDescription;
 import org.bouncycastle.tls.AlertLevel;
@@ -12,6 +13,7 @@ import org.bouncycastle.tls.CertificateRequest;
 import org.bouncycastle.tls.ChannelBinding;
 import org.bouncycastle.tls.ClientCertificateType;
 import org.bouncycastle.tls.DefaultTlsServer;
+import org.bouncycastle.tls.ProtocolName;
 import org.bouncycastle.tls.ProtocolVersion;
 import org.bouncycastle.tls.SignatureAlgorithm;
 import org.bouncycastle.tls.TlsCredentialedDecryptor;
@@ -28,6 +30,14 @@ class MockTlsServer
     MockTlsServer()
     {
         super(new BcTlsCrypto(new SecureRandom()));
+    }
+
+    protected Vector getProtocolNames()
+    {
+        Vector protocolNames = new Vector();
+        protocolNames.addElement(ProtocolName.HTTP_2_TLS);
+        protocolNames.addElement(ProtocolName.HTTP_1_1);
+        return protocolNames;
     }
 
     public void notifyAlertRaised(short alertLevel, short alertDescription, String message, Throwable cause)
@@ -73,7 +83,12 @@ class MockTlsServer
         }
 
         Vector certificateAuthorities = new Vector();
-        certificateAuthorities.addElement(TlsTestUtils.loadBcCertificateResource("x509-ca.pem").getSubject());
+//      certificateAuthorities.addElement(TlsTestUtils.loadBcCertificateResource("x509-ca-dsa.pem").getSubject());
+//      certificateAuthorities.addElement(TlsTestUtils.loadBcCertificateResource("x509-ca-ecdsa.pem").getSubject());
+//      certificateAuthorities.addElement(TlsTestUtils.loadBcCertificateResource("x509-ca-rsa.pem").getSubject());
+
+        // All the CA certificates are currently configured with this subject
+        certificateAuthorities.addElement(new X500Name("CN=BouncyCastle TLS Test CA"));
 
         return new CertificateRequest(certificateTypes, serverSigAlgs, certificateAuthorities);
     }
@@ -94,7 +109,10 @@ class MockTlsServer
 
         boolean isEmpty = (clientCertificate == null || clientCertificate.isEmpty());
         if (!isEmpty && !TlsTestUtils.isCertificateOneOf(context.getCrypto(), chain[0],
-            new String[]{ "x509-client.pem", "x509-client-dsa.pem", "x509-client-ecdsa.pem"}))
+            new String[]
+            { "x509-client-dsa.pem", "x509-client-ecdh.pem", "x509-client-ecdsa.pem", "x509-client-ed25519.pem",
+                "x509-client-rsa_pss_256.pem", "x509-client-rsa_pss_384.pem", "x509-client-rsa_pss_512.pem",
+                "x509-client-rsa.pem" }))
         {
             throw new TlsFatalAlert(AlertDescription.bad_certificate);
         }
@@ -104,20 +122,33 @@ class MockTlsServer
     {
         super.notifyHandshakeComplete();
 
+        ProtocolName protocolName = context.getSecurityParameters().getApplicationProtocol();
+        if (protocolName != null)
+        {
+            System.out.println("Server ALPN: " + protocolName.getUtf8Decoding());
+        }
+
+        byte[] tlsServerEndPoint = context.exportChannelBinding(ChannelBinding.tls_server_end_point);
+        System.out.println("Server 'tls-server-end-point': " + hex(tlsServerEndPoint));
+
         byte[] tlsUnique = context.exportChannelBinding(ChannelBinding.tls_unique);
-        System.out.println("'tls-unique': " + Hex.toHexString(tlsUnique));
+        System.out.println("Server 'tls-unique': " + hex(tlsUnique));
     }
 
     protected TlsCredentialedDecryptor getRSAEncryptionCredentials()
         throws IOException
     {
-        return TlsTestUtils.loadEncryptionCredentials(context, new String[]{"x509-server.pem", "x509-ca.pem"},
-            "x509-server-key.pem");
+        return TlsTestUtils.loadEncryptionCredentials(context, new String[]{"x509-server-rsa-enc.pem", "x509-ca-rsa.pem"},
+            "x509-server-key-rsa-enc.pem");
     }
 
     protected TlsCredentialedSigner getRSASignerCredentials() throws IOException
     {
-        return TlsTestUtils.loadSignerCredentials(context, supportedSignatureAlgorithms, SignatureAlgorithm.rsa,
-            "x509-server.pem", "x509-server-key.pem");
+        return TlsTestUtils.loadSignerCredentialsServer(context, supportedSignatureAlgorithms, SignatureAlgorithm.rsa);
+    }
+
+    protected String hex(byte[] data)
+    {
+        return data == null ? "(null)" : Hex.toHexString(data);
     }
 }

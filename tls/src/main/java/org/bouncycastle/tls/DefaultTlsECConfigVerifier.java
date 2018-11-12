@@ -1,32 +1,50 @@
 package org.bouncycastle.tls;
 
+import java.util.Vector;
+
 import org.bouncycastle.tls.crypto.TlsECConfig;
-import org.bouncycastle.util.Arrays;
+import org.bouncycastle.util.Integers;
 
 public class DefaultTlsECConfigVerifier
     implements TlsECConfigVerifier
 {
     protected int minimumCurveBits;
-    protected int[] namedCurves;
+    protected Vector namedGroups; 
 
-    public DefaultTlsECConfigVerifier(int minimumCurveBits, int[] namedCurves)
+    public DefaultTlsECConfigVerifier(int minimumCurveBits, Vector namedGroups)
     {
-        this.minimumCurveBits = minimumCurveBits;
-        this.namedCurves = Arrays.clone(namedCurves);
+        this.minimumCurveBits = Math.max(1, minimumCurveBits);
+        this.namedGroups = namedGroups;
     }
 
     public boolean accept(TlsECConfig ecConfig)
     {
-        // NOTE: Any value of ecConfig.pointCompression is acceptable
+        int namedGroup = ecConfig.getNamedGroup();
 
-        int namedCurve = ecConfig.getNamedCurve();
+        if (ecConfig.getPointCompression())
+        {
+            switch (namedGroup)
+            {
+            case NamedGroup.x25519:
+            case NamedGroup.x448:
+                return false;
+            default:
+                // NOTE: Any value of ecConfig.pointCompression is acceptable
+                break;
+            }
+        }
 
-        if (NamedCurve.getCurveBits(namedCurve) < minimumCurveBits)
+        if (namedGroup < 0)
         {
             return false;
         }
 
-        if (namedCurves != null && !Arrays.contains(namedCurves, namedCurve))
+        if (NamedGroup.getCurveBits(namedGroup) < minimumCurveBits)
+        {
+            return false;
+        }
+
+        if (namedGroups != null && !namedGroups.contains(Integers.valueOf(namedGroup)))
         {
             /*
              * RFC 4492 4. [...] servers MUST NOT negotiate the use of an ECC cipher suite unless

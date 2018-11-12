@@ -1,7 +1,6 @@
 package org.bouncycastle.tls.crypto.impl.jcajce;
 
 import java.io.IOException;
-import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.SecureRandom;
 import java.security.interfaces.RSAPrivateKey;
@@ -98,7 +97,11 @@ public class JceDefaultTlsCredentialedDecryptor
         {
             Cipher c = crypto.createRSAEncryptionCipher();
             c.init(Cipher.DECRYPT_MODE, rsaServerPrivateKey);
-            M = c.doFinal(encryptedPreMasterSecret);
+            byte[] m = c.doFinal(encryptedPreMasterSecret);
+            if (m != null && m.length == 48)
+            {
+                M = m;
+            }
         }
         catch (Exception e)
         {

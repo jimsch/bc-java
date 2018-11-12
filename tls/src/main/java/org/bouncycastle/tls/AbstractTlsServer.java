@@ -4,8 +4,6 @@ import java.io.IOException;
 import java.util.Hashtable;
 import java.util.Vector;
 
-import org.bouncycastle.tls.crypto.DHGroup;
-import org.bouncycastle.tls.crypto.DHStandardGroups;
 import org.bouncycastle.tls.crypto.TlsCipher;
 import org.bouncycastle.tls.crypto.TlsCrypto;
 import org.bouncycastle.tls.crypto.TlsCryptoParameters;
@@ -26,19 +24,19 @@ public abstract class AbstractTlsServer
 
     protected ProtocolVersion clientVersion;
     protected int[] offeredCipherSuites;
-    protected short[] offeredCompressionMethods;
     protected Hashtable clientExtensions;
 
     protected boolean encryptThenMACOffered;
     protected short maxFragmentLengthOffered;
     protected boolean truncatedHMacOffered;
     protected Vector supportedSignatureAlgorithms;
-    protected int[] namedCurves;
+    protected int[] clientSupportedGroups;
     protected short[] clientECPointFormats, serverECPointFormats;
+    protected CertificateStatusRequest certificateStatusRequest;
 
     protected ProtocolVersion serverVersion;
     protected int selectedCipherSuite;
-    protected short selectedCompressionMethod;
+    protected ProtocolName selectedProtocolName;
     protected Hashtable serverExtensions;
 
     public AbstractTlsServer(TlsCrypto crypto)
@@ -70,16 +68,6 @@ public abstract class AbstractTlsServer
 
     protected abstract int[] getCipherSuites();
 
-    protected short[] getCompressionMethods()
-    {
-        return new short[]{CompressionMethod._null};
-    }
-
-    protected DHGroup getDHParameters()
-    {
-        return DHStandardGroups.rfc3526_2048;
-    }
-
     protected ProtocolVersion getMaximumVersion()
     {
         return ProtocolVersion.TLSv12;
@@ -94,29 +82,50 @@ public abstract class AbstractTlsServer
     {
         // NOTE: BC supports all the current set of point formats so we don't check them here
 
-        if (namedCurves == null)
+        if (clientSupportedGroups == null)
         {
             /*
              * RFC 4492 4. A client that proposes ECC cipher suites may choose not to include these
              * extensions. In this case, the server is free to choose any one of the elliptic curves
              * or point formats [...].
              */
-            return NamedCurve.getMaximumCurveBits();
+            return NamedGroup.getMaximumCurveBits();
         }
 
         int maxBits = 0;
-        for (int i = 0; i < namedCurves.length; ++i)
+        for (int i = 0; i < clientSupportedGroups.length; ++i)
         {
-            maxBits = Math.max(maxBits, NamedCurve.getCurveBits(namedCurves[i]));
+            maxBits = Math.max(maxBits, NamedGroup.getCurveBits(clientSupportedGroups[i]));
         }
         return maxBits;
     }
 
-    protected boolean isSelectableCipherSuite(int cipherSuite, int availCurveBits, Vector sigAlgs)
+    protected int getMaximumNegotiableFiniteFieldBits()
+    {
+        if (clientSupportedGroups == null)
+        {
+            return NamedGroup.getMaximumFiniteFieldBits();
+        }
+
+        int maxBits = 0;
+        for (int i = 0; i < clientSupportedGroups.length; ++i)
+        {
+            maxBits = Math.max(maxBits, NamedGroup.getFiniteFieldBits(clientSupportedGroups[i]));
+        }
+        return maxBits;
+    }
+
+    protected Vector getProtocolNames()
+    {
+        return null;
+    }
+
+    protected boolean isSelectableCipherSuite(int cipherSuite, int availCurveBits, int availFiniteFieldBits, Vector sigAlgs)
     {
         return Arrays.contains(this.offeredCipherSuites, cipherSuite)
             && TlsUtils.isValidCipherSuiteForVersion(cipherSuite, serverVersion)
             && availCurveBits >= TlsECCUtils.getMinimumCurveBits(cipherSuite)
+            && availFiniteFieldBits >= TlsDHUtils.getMinimumFiniteFieldBits(cipherSuite)
             && TlsUtils.isValidCipherSuiteForSignatureAlgorithms(cipherSuite, sigAlgs);
     }
 
@@ -126,20 +135,20 @@ public abstract class AbstractTlsServer
         return true;
     }
 
-    protected int selectCurve(int minimumCurveBits)
+    protected int selectECDHNamedGroup(int minimumCurveBits)
     {
-        if (namedCurves == null)
+        if (clientSupportedGroups == null)
         {
             return selectDefaultCurve(minimumCurveBits);
         }
 
-        // Try to find a supported named curve of the required size from the client's list.
-        for (int i = 0; i < namedCurves.length; ++i)
+        // Try to find a supported named group of the required size from the client's list.
+        for (int i = 0; i < clientSupportedGroups.length; ++i)
         {
-            int namedCurve = namedCurves[i];
-            if (NamedCurve.getCurveBits(namedCurve) >= minimumCurveBits)
+            int namedGroup = clientSupportedGroups[i];
+            if (NamedGroup.getCurveBits(namedGroup) >= minimumCurveBits)
             {
-                return namedCurve;
+                return namedGroup;
             }
         }
 
@@ -148,39 +157,96 @@ public abstract class AbstractTlsServer
 
     protected int selectDefaultCurve(int minimumCurveBits)
     {
-        // Note: this must all have a co-factor of 1 to qualify for FIPS ECDH.
-        return minimumCurveBits <= 256 ? NamedCurve.secp256r1
-            :  minimumCurveBits <= 384 ? NamedCurve.secp384r1
-            :  minimumCurveBits <= 521 ? NamedCurve.secp521r1
+        return minimumCurveBits <= 256 ? NamedGroup.secp256r1
+            :  minimumCurveBits <= 384 ? NamedGroup.secp384r1
+            :  minimumCurveBits <= 521 ? NamedGroup.secp521r1
+            :  minimumCurveBits <= 571 ? NamedGroup.sect571r1
             :  -1;
     }
 
-    protected TlsDHConfig selectDHConfig()
+    protected TlsDHConfig selectDefaultDHConfig(int minimumFiniteFieldBits)
     {
-        return TlsDHUtils.selectDHConfig(getDHParameters()); 
+        int namedGroup = minimumFiniteFieldBits <= 2048 ? NamedGroup.ffdhe2048
+                      :  minimumFiniteFieldBits <= 3072 ? NamedGroup.ffdhe3072
+                      :  minimumFiniteFieldBits <= 4096 ? NamedGroup.ffdhe4096
+                      :  minimumFiniteFieldBits <= 6144 ? NamedGroup.ffdhe6144
+                      :  minimumFiniteFieldBits <= 8192 ? NamedGroup.ffdhe8192
+                      :  -1;
+
+        return TlsDHUtils.createNamedDHConfig(namedGroup);
     }
 
-    protected TlsECConfig selectECConfig() throws IOException
+    protected TlsDHConfig selectDHConfig() throws IOException
+    {
+        int minimumFiniteFieldBits = TlsDHUtils.getMinimumFiniteFieldBits(selectedCipherSuite);
+
+        TlsDHConfig dhConfig = selectDHConfig(minimumFiniteFieldBits);
+        if (dhConfig == null)
+        {
+            throw new TlsFatalAlert(AlertDescription.internal_error);
+        }
+        return dhConfig;
+    }
+
+    protected TlsDHConfig selectDHConfig(int minimumFiniteFieldBits)
+    {
+        if (clientSupportedGroups == null)
+        {
+            return selectDefaultDHConfig(minimumFiniteFieldBits);
+        }
+
+        // Try to find a supported named group of the required size from the client's list.
+        for (int i = 0; i < clientSupportedGroups.length; ++i)
+        {
+            int namedGroup = clientSupportedGroups[i];
+            if (NamedGroup.getFiniteFieldBits(namedGroup) >= minimumFiniteFieldBits)
+            {
+                return new TlsDHConfig(namedGroup);
+            }
+        }
+
+        return null;
+    }
+
+    protected TlsECConfig selectECDHConfig() throws IOException
     {
         int minimumCurveBits = TlsECCUtils.getMinimumCurveBits(selectedCipherSuite);
 
-        int namedCurve = selectCurve(minimumCurveBits);
-        if (namedCurve < 0)
+        int namedGroup = selectECDHNamedGroup(minimumCurveBits);
+        if (namedGroup < 0)
         {
             throw new TlsFatalAlert(AlertDescription.internal_error);
         }
 
-        boolean compressed = TlsECCUtils.isCompressionPreferred(clientECPointFormats, namedCurve);
+        boolean compressed = TlsECCUtils.isCompressionPreferred(clientECPointFormats, namedGroup);
 
         TlsECConfig ecConfig = new TlsECConfig();
-        ecConfig.setNamedCurve(namedCurve);
+        ecConfig.setNamedGroup(namedGroup);
         ecConfig.setPointCompression(compressed);
         return ecConfig;
     }
-    
+
+    protected ProtocolName selectProtocolName(Vector clientProtocolNames, Vector serverProtocolNames)
+    {
+        for (int i = 0; i < serverProtocolNames.size(); ++i)
+        {
+            ProtocolName serverProtocolName = (ProtocolName)serverProtocolNames.elementAt(i);
+            if (clientProtocolNames.contains(serverProtocolName))
+            {
+                return serverProtocolName;
+            }
+        }
+        return null;
+    }
+
     public void init(TlsServerContext context)
     {
         this.context = context;
+    }
+
+    public TlsSession getSessionToResume(byte[] sessionID)
+    {
+        return null;
     }
 
     public void notifyClientVersion(ProtocolVersion clientVersion)
@@ -209,12 +275,6 @@ public abstract class AbstractTlsServer
         this.offeredCipherSuites = offeredCipherSuites;
     }
 
-    public void notifyOfferedCompressionMethods(short[] offeredCompressionMethods)
-        throws IOException
-    {
-        this.offeredCompressionMethods = offeredCompressionMethods;
-    }
-
     public void processClientExtensions(Hashtable clientExtensions)
         throws IOException
     {
@@ -222,6 +282,20 @@ public abstract class AbstractTlsServer
 
         if (clientExtensions != null)
         {
+            Vector clientProtocolNames = TlsExtensionsUtils.getALPNExtensionClient(clientExtensions);
+            if (clientProtocolNames != null && !clientProtocolNames.isEmpty())
+            {
+                Vector serverProtocolNames = getProtocolNames();
+                if (serverProtocolNames != null && !serverProtocolNames.isEmpty())
+                {
+                    this.selectedProtocolName = selectProtocolName(clientProtocolNames, serverProtocolNames);
+                    if (selectedProtocolName == null)
+                    {
+                        throw new TlsFatalAlert(AlertDescription.no_application_protocol);
+                    }
+                }
+            }
+
             this.encryptThenMACOffered = TlsExtensionsUtils.hasEncryptThenMACExtension(clientExtensions);
 
             this.maxFragmentLengthOffered = TlsExtensionsUtils.getMaxFragmentLengthExtension(clientExtensions);
@@ -245,8 +319,10 @@ public abstract class AbstractTlsServer
                 }
             }
 
-            this.namedCurves = TlsECCUtils.getSupportedEllipticCurvesExtension(clientExtensions);
+            this.clientSupportedGroups = TlsExtensionsUtils.getSupportedGroupsExtension(clientExtensions);
             this.clientECPointFormats = TlsECCUtils.getSupportedPointFormatsExtension(clientExtensions);
+
+            this.certificateStatusRequest = TlsExtensionsUtils.getStatusRequestExtension(clientExtensions);
         }
 
         /*
@@ -254,10 +330,12 @@ public abstract class AbstractTlsServer
          * does not propose any ECC cipher suites.
          * 
          * NOTE: This was overly strict as there may be ECC cipher suites that we don't recognize.
-         * Also, draft-ietf-tls-negotiated-ff-dhe will be overloading the 'elliptic_curves'
-         * extension to explicitly allow FFDHE (i.e. non-ECC) groups.
+         * Also, RFC 7919 renamed 'elliptic_curves' to 'supported_groups' and now allows FFDHE (i.e.
+         * non-ECC) groups. If ec_point_formats are unnecessarily present, it doesn't seem worth
+         * failing the handshake over.
          */
-//        if (!this.eccCipherSuitesOffered && (this.namedCurves != null || this.clientECPointFormats != null))
+//        if ((this.clientSupportedGroups != null || this.clientECPointFormats != null)
+//            && !TlsECCUtils.containsECCipherSuites(offeredCipherSuites))
 //        {
 //            throw new TlsFatalAlert(AlertDescription.illegal_parameter);
 //        }
@@ -300,29 +378,16 @@ public abstract class AbstractTlsServer
          * formats supported by the client [...].
          */
         int availCurveBits = getMaximumNegotiableCurveBits();
+        int availFiniteFieldBits = getMaximumNegotiableFiniteFieldBits();
 
         int[] cipherSuites = getCipherSuites();
         for (int i = 0; i < cipherSuites.length; ++i)
         {
             int cipherSuite = cipherSuites[i];
-            if (isSelectableCipherSuite(cipherSuite, availCurveBits, sigAlgs)
+            if (isSelectableCipherSuite(cipherSuite, availCurveBits, availFiniteFieldBits, sigAlgs)
                 && selectCipherSuite(cipherSuite))
             {
                 return cipherSuite;
-            }
-        }
-        throw new TlsFatalAlert(AlertDescription.handshake_failure);
-    }
-
-    public short getSelectedCompressionMethod()
-        throws IOException
-    {
-        short[] compressionMethods = getCompressionMethods();
-        for (int i = 0; i < compressionMethods.length; ++i)
-        {
-            if (Arrays.contains(offeredCompressionMethods, compressionMethods[i]))
-            {
-                return this.selectedCompressionMethod = compressionMethods[i];
             }
         }
         throw new TlsFatalAlert(AlertDescription.handshake_failure);
@@ -332,6 +397,11 @@ public abstract class AbstractTlsServer
     public Hashtable getServerExtensions()
         throws IOException
     {
+        if (this.selectedProtocolName != null)
+        {
+            TlsExtensionsUtils.addALPNExtensionServer(checkServerExtensions(), selectedProtocolName);
+        }
+
         if (this.encryptThenMACOffered && allowEncryptThenMAC())
         {
             /*
@@ -363,10 +433,19 @@ public abstract class AbstractTlsServer
              * message including a Supported Point Formats Extension appends this extension (along
              * with others) to its ServerHello message, enumerating the point formats it can parse.
              */
-            this.serverECPointFormats = new short[]{ ECPointFormat.uncompressed,
-                ECPointFormat.ansiX962_compressed_prime, ECPointFormat.ansiX962_compressed_char2, };
+            this.serverECPointFormats = new short[]{ ECPointFormat.uncompressed };
 
             TlsECCUtils.addSupportedPointFormatsExtension(checkServerExtensions(), serverECPointFormats);
+        }
+
+        if (this.certificateStatusRequest != null)
+        {
+            /*
+             * RFC 6066 8. If a server returns a "CertificateStatus" message, then the server MUST
+             * have included an extension of type "status_request" with empty "extension_data" in
+             * the extended server hello.
+             */
+            checkServerExtensions().put(TlsExtensionsUtils.EXT_status_request, TlsExtensionsUtils.createEmptyExtensionData());
         }
 
         return serverExtensions;
@@ -403,23 +482,6 @@ public abstract class AbstractTlsServer
         throws IOException
     {
         throw new TlsFatalAlert(AlertDescription.internal_error);
-    }
-
-    public TlsCompression getCompression()
-        throws IOException
-    {
-        switch (selectedCompressionMethod)
-        {
-        case CompressionMethod._null:
-            return new TlsNullCompression();
-
-        default:
-            /*
-             * Note: internal error here; we selected the compression method, so if we now can't
-             * produce an implementation, we shouldn't have chosen it!
-             */
-            throw new TlsFatalAlert(AlertDescription.internal_error);
-        }
     }
 
     public TlsCipher getCipher()

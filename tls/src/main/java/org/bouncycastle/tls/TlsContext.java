@@ -1,6 +1,7 @@
 package org.bouncycastle.tls;
 
 import org.bouncycastle.tls.crypto.TlsCrypto;
+import org.bouncycastle.tls.crypto.TlsNonceGenerator;
 
 /**
  * Base interface for a TLS context implementation.
@@ -8,6 +9,10 @@ import org.bouncycastle.tls.crypto.TlsCrypto;
 public interface TlsContext
 {
     TlsCrypto getCrypto();
+
+    TlsNonceGenerator getNonceGenerator();
+
+    TlsPeerOptions getPeerOptions();
 
     SecurityParameters getSecurityParameters();
 
@@ -50,8 +55,10 @@ public interface TlsContext
      * Export the value of the specified channel binding. Only available after the handshake has
      * successfully completed.
      * 
-     * @param channelBinding A {@link ChannelBinding} constant specifying the channel binding to export.
-     * @return A copy of the channel binding data as a {@link byte[]}.
+     * @param channelBinding
+     *            A {@link ChannelBinding} constant specifying the channel binding to export.
+     * @return A copy of the channel binding data as a {@link byte[]}, or null if the binding could
+     *         not be determined.
      */
     byte[] exportChannelBinding(int channelBinding);
 

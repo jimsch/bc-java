@@ -36,3 +36,31 @@ g/private final/s/final//
 w
 q
 %
+
+ed org/bouncycastle/crypto/util/PBKDF2Config.java <<%
+g/private final/s/final//
+w
+q
+%
+
+ed org/bouncycastle/crypto/util/ScryptConfig.java <<%
+g/private final/s/final//
+w
+q
+%
+
+ed org/bouncycastle/pqc/crypto/newhope/NHOtherInfoGenerator.java <<%
+g/private final/s/final//
+g/protected final/s/final//
+g/(getPublicKey(/s//(NHOtherInfoGenerator.getPublicKey(/
+g/return getEncod/s//return NHOtherInfoGenerator.getEncod/
+w
+q
+%
+
+ed org/bouncycastle/crypto/CryptoServicesRegistrar.java <<%
+g/private final String/s/final//
+g/private final Class/s/final//
+w
+q
+%

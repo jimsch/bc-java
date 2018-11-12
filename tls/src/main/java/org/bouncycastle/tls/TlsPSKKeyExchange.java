@@ -13,7 +13,6 @@ import org.bouncycastle.tls.crypto.TlsDHConfig;
 import org.bouncycastle.tls.crypto.TlsECConfig;
 import org.bouncycastle.tls.crypto.TlsSecret;
 import org.bouncycastle.util.Arrays;
-import org.bouncycastle.util.io.Streams;
 
 /**
  * (D)TLS PSK key exchange (RFC 4279).
@@ -96,12 +95,8 @@ public class TlsPSKKeyExchange
         {
             throw new TlsFatalAlert(AlertDescription.internal_error);
         }
-        if (!(serverCredentials instanceof TlsCredentialedDecryptor))
-        {
-            throw new TlsFatalAlert(AlertDescription.internal_error);
-        }
 
-        this.serverCredentials = (TlsCredentialedDecryptor)serverCredentials;
+        this.serverCredentials = TlsUtils.requireDecryptorCredentials(serverCredentials);
     }
 
     public void processServerCertificate(Certificate serverCertificate) throws IOException
@@ -110,14 +105,9 @@ public class TlsPSKKeyExchange
         {
             throw new TlsFatalAlert(AlertDescription.unexpected_message);
         }
-        if (serverCertificate.isEmpty())
-        {
-            throw new TlsFatalAlert(AlertDescription.bad_certificate);
-        }
 
-        checkServerCertSigAlg(serverCertificate);
-
-        this.serverCertificate = serverCertificate.getCertificateAt(0).useInRole(ConnectionEnd.server, keyExchange);
+        this.serverCertificate = checkSigAlgOfServerCerts(serverCertificate)
+            .useInRole(ConnectionEnd.server, keyExchange);
     }
 
     public byte[] generateServerKeyExchange() throws IOException
@@ -208,11 +198,6 @@ public class TlsPSKKeyExchange
         }
     }
 
-    public void validateCertificateRequest(CertificateRequest certificateRequest) throws IOException
-    {
-        throw new TlsFatalAlert(AlertDescription.unexpected_message);
-    }
-
     public void processClientCredentials(TlsCredentials clientCredentials) throws IOException
     {
         throw new TlsFatalAlert(AlertDescription.internal_error);
@@ -285,16 +270,7 @@ public class TlsPSKKeyExchange
         }
         else if (this.keyExchange == KeyExchangeAlgorithm.RSA_PSK)
         {
-            byte[] encryptedPreMasterSecret;
-            if (TlsUtils.isSSL(context))
-            {
-                // TODO Do any SSLv3 clients actually include the length?
-                encryptedPreMasterSecret = Streams.readAll(input);
-            }
-            else
-            {
-                encryptedPreMasterSecret = TlsUtils.readOpaque16(input);
-            }
+            byte[] encryptedPreMasterSecret = TlsUtils.readOpaque16(input);
 
             this.preMasterSecret = serverCredentials.decrypt(new TlsCryptoParameters(context), encryptedPreMasterSecret);
         }
@@ -360,7 +336,7 @@ public class TlsPSKKeyExchange
 
     protected void processEphemeralECDH(short[] localECPointFormats, byte[] point) throws IOException
     {
-        TlsECCUtils.checkPointEncoding(localECPointFormats, ecConfig.getNamedCurve(), point);
+        TlsECCUtils.checkPointEncoding(localECPointFormats, ecConfig.getNamedGroup(), point);
 
         this.agreement.receivePeerValue(point);
     }

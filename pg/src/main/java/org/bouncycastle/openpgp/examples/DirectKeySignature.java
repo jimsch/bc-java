@@ -27,14 +27,13 @@ import org.bouncycastle.openpgp.operator.jcajce.JcePBESecretKeyDecryptorBuilder;
  * A simple utility class that directly signs a public key and writes the signed key to "SignedKey.asc" in 
  * the current working directory.
  * <p>
- * To sign a key: DirectKeySignature secretKeyFile secretKeyPass publicKeyFile(key to be signed) NotationName NotationValue.<br/>
+ * To sign a key: DirectKeySignature secretKeyFile secretKeyPass publicKeyFile(key to be signed) NotationName NotationValue.
  * </p><p>
- * To display a NotationData packet from a publicKey previously signed: DirectKeySignature signedPublicKeyFile.<br/>
+ * To display a NotationData packet from a publicKey previously signed: DirectKeySignature signedPublicKeyFile.
  * </p><p>
  * <b>Note</b>: this example will silently overwrite files, nor does it pay any attention to
  * the specification of "_CONSOLE" in the filename. It also expects that a single pass phrase
  * will have been used.
- * </p>
  */
 public class DirectKeySignature
 {
@@ -57,11 +56,11 @@ public class DirectKeySignature
                 
                 System.out.println("Signature date is: " + sig.getHashedSubPackets().getSignatureCreationTime());
 
-                NotationData[] data = sig.getHashedSubPackets().getNotationDataOccurences();//.getSubpacket(SignatureSubpacketTags.NOTATION_DATA);
+                NotationData[] data = sig.getHashedSubPackets().getNotationDataOccurrences();//.getSubpacket(SignatureSubpacketTags.NOTATION_DATA);
                 
                 for (int i = 0; i < data.length; i++)
                 {
-                    System.out.println("Found Notaion named '"+data[i].getNotationName()+"' with content '"+data[i].getNotationValue()+"'.");
+                    System.out.println("Found Notation named '"+data[i].getNotationName()+"' with content '"+data[i].getNotationValue()+"'.");
                 }
             }
         }

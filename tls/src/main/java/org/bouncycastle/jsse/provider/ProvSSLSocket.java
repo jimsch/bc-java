@@ -6,11 +6,11 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 
-import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 
 import org.bouncycastle.jsse.BCSSLConnection;
+import org.bouncycastle.jsse.BCSSLParameters;
 
 class ProvSSLSocket
     extends ProvSSLSocketBase
@@ -69,6 +69,9 @@ class ProvSSLSocket
 
     public BCSSLConnection getConnection()
     {
+        /*
+         * TODO[jsse] This should actually block until handshake complete (and maybe start it)
+         */
         return engine.getConnection();
     }
 
@@ -114,6 +117,11 @@ class ProvSSLSocket
     {
 //        return super.getOutputStream();
         throw new UnsupportedOperationException();
+    }
+
+    public BCSSLParameters getParameters()
+    {
+        return engine.getParameters();
     }
 
     @Override
@@ -174,6 +182,11 @@ class ProvSSLSocket
     public void setNeedClientAuth(boolean need)
     {
         engine.setNeedClientAuth(need);
+    }
+
+    public void setParameters(BCSSLParameters parameters)
+    {
+        engine.setParameters(parameters);
     }
 
     @Override

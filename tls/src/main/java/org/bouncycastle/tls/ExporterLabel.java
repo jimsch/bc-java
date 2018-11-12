@@ -30,7 +30,12 @@ public class ExporterLabel
     public static final String dtls_srtp = "EXTRACTOR-dtls_srtp";
 
     /*
-     * draft-ietf-tls-session-hash-04
+     * RFC 7627
      */
     public static final String extended_master_secret = "extended master secret";
+
+    /*
+     * draft-ietf-tokbind-protocol-16
+     */
+    public static final String token_binding = "EXPORTER-Token-Binding";
 }

@@ -23,7 +23,7 @@ public interface TlsClient
     TlsSession getSessionToResume();
 
     /**
-     * Return the {@link ProtocolVersion} to use for the <c>TLSPlaintext.version</c> field prior to
+     * Return the {@link ProtocolVersion} to use for the <code>TLSPlaintext.version</code> field prior to
      * receiving the server version. NOTE: This method is <b>not</b> called for DTLS.
      *
      * <p>
@@ -44,8 +44,6 @@ public interface TlsClient
 
     int[] getCipherSuites();
 
-    short[] getCompressionMethods();
-
     // Hashtable is (Integer -> byte[])
     Hashtable getClientExtensions()
         throws IOException;
@@ -62,8 +60,6 @@ public interface TlsClient
     void notifySessionID(byte[] sessionID);
 
     void notifySelectedCipherSuite(int selectedCipherSuite);
-
-    void notifySelectedCompressionMethod(short selectedCompressionMethod);
 
     // Hashtable is (Integer -> byte[])
     void processServerExtensions(Hashtable serverExtensions)

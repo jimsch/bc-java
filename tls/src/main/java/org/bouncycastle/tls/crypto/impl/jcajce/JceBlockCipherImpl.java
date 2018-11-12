@@ -18,31 +18,38 @@ public class JceBlockCipherImpl
     private final int cipherMode;
     private final Cipher cipher;
     private final String algorithm;
+    private final int keySize;
 
     private SecretKey key;
 
-    public JceBlockCipherImpl(Cipher cipher, String algorithm, boolean isEncrypting)
+    public JceBlockCipherImpl(Cipher cipher, String algorithm, int keySize, boolean isEncrypting)
         throws GeneralSecurityException
     {
         this.cipher = cipher;
         this.algorithm = algorithm;
+        this.keySize = keySize;
         this.cipherMode = (isEncrypting) ? Cipher.ENCRYPT_MODE : Cipher.DECRYPT_MODE;
     }
 
-    public void setKey(byte[] key)
+    public void setKey(byte[] key, int keyOff, int keyLen)
     {
-        this.key = new SecretKeySpec(key, algorithm);
+        if (keySize != keyLen)
+        {
+            throw new IllegalStateException();
+        }
+
+        this.key = new SecretKeySpec(key, keyOff, keyLen, algorithm);
     }
 
-    public void init(byte[] iv)
+    public void init(byte[] iv, int ivOff, int ivLen)
     {
         try
         {
-            cipher.init(cipherMode, key, new IvParameterSpec(iv));
+            cipher.init(cipherMode, key, new IvParameterSpec(iv, ivOff, ivLen));
         }
         catch (GeneralSecurityException e)
         {
-            throw new IllegalStateException(e);
+            throw Exceptions.illegalStateException(e.getMessage(), e);
         }
     }
 
@@ -54,7 +61,7 @@ public class JceBlockCipherImpl
         }
         catch (GeneralSecurityException e)
         {
-            throw new IllegalStateException(e);
+            throw Exceptions.illegalStateException(e.getMessage(), e);
         }
     }
 

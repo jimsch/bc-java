@@ -5,17 +5,21 @@ import java.net.Socket;
 import java.security.Principal;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.Hashtable;
 import java.util.Set;
 import java.util.Vector;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import javax.net.ssl.SSLSession;
+import javax.net.ssl.SSLException;
 import javax.net.ssl.X509KeyManager;
 import javax.net.ssl.X509TrustManager;
 
 import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.jsse.BCSNIMatcher;
+import org.bouncycastle.jsse.BCSNIServerName;
 import org.bouncycastle.tls.AlertDescription;
 import org.bouncycastle.tls.AlertLevel;
 import org.bouncycastle.tls.Certificate;
@@ -24,12 +28,17 @@ import org.bouncycastle.tls.ClientCertificateType;
 import org.bouncycastle.tls.DefaultTlsServer;
 import org.bouncycastle.tls.KeyExchangeAlgorithm;
 import org.bouncycastle.tls.ProtocolVersion;
+import org.bouncycastle.tls.ServerNameList;
 import org.bouncycastle.tls.SignatureAndHashAlgorithm;
 import org.bouncycastle.tls.TlsCredentials;
+import org.bouncycastle.tls.TlsDHUtils;
+import org.bouncycastle.tls.TlsExtensionsUtils;
 import org.bouncycastle.tls.TlsFatalAlert;
+import org.bouncycastle.tls.TlsSession;
 import org.bouncycastle.tls.TlsUtils;
 import org.bouncycastle.tls.crypto.TlsCrypto;
 import org.bouncycastle.tls.crypto.TlsCryptoParameters;
+import org.bouncycastle.tls.crypto.TlsDHConfig;
 import org.bouncycastle.tls.crypto.impl.jcajce.JcaDefaultTlsCredentialedSigner;
 import org.bouncycastle.tls.crypto.impl.jcajce.JcaTlsCrypto;
 import org.bouncycastle.tls.crypto.impl.jcajce.JceDefaultTlsCredentialedAgreement;
@@ -41,21 +50,59 @@ class ProvTlsServer
 {
     private static Logger LOG = Logger.getLogger(ProvTlsServer.class.getName());
 
+    private static final int provEphemeralDHKeySize = PropertyUtils.getIntegerSystemProperty("jdk.tls.ephemeralDHKeySize", 2048, 1024, 8192);
+
     protected final ProvTlsManager manager;
     protected final ProvSSLParameters sslParameters;
 
+    protected ProvSSLSessionImpl sslSession = null;
+    protected BCSNIServerName matchedSNIServerName = null;
     protected Set<String> keyManagerMissCache = null;
     protected TlsCredentials credentials = null;
     protected boolean handshakeComplete = false;
 
-    ProvTlsServer(ProvTlsManager manager)
+    ProvTlsServer(ProvTlsManager manager, ProvSSLParameters sslParameters) throws SSLException
     {
         super(manager.getContextData().getCrypto());
 
         this.manager = manager;
-        this.sslParameters = manager.getProvSSLParameters();
+        this.sslParameters = sslParameters;
+
+        if (!manager.getEnableSessionCreation())
+        {
+            throw new SSLException("Session resumption not implemented yet and session creation is disabled");
+        }
     }
 
+    @Override
+    protected int getMaximumNegotiableCurveBits()
+    {
+        // NOTE: BC supports all the current set of point formats so we don't check them here
+
+        return SupportedGroups.getServerMaximumNegotiableCurveBits(manager.getContext().isFips(), clientSupportedGroups);
+    }
+
+    @Override
+    protected int getMaximumNegotiableFiniteFieldBits()
+    {
+        int maxBits = SupportedGroups.getServerMaximumNegotiableFiniteFieldBits(manager.getContext().isFips(), clientSupportedGroups);
+
+        return maxBits >= provEphemeralDHKeySize ? maxBits : 0;
+    }
+
+    @Override
+    protected ProtocolVersion getMaximumVersion()
+    {
+        return manager.getContext().getMaximumVersion(sslParameters.getProtocols());
+    }
+
+    @Override
+    protected Vector getProtocolNames()
+    {
+        return JsseUtils.getProtocolNames(sslParameters.getApplicationProtocols());
+    }
+
+    @Override
     protected boolean selectCipherSuite(int cipherSuite) throws IOException
     {
         if (!selectCredentials(cipherSuite))
@@ -63,7 +110,52 @@ class ProvTlsServer
             return false;
         }
 
+        manager.getContext().validateNegotiatedCipherSuite(cipherSuite);
+
         return super.selectCipherSuite(cipherSuite);
+    }
+
+    @Override
+    protected int selectECDHNamedGroup(int minimumCurveBits)
+    {
+        if (clientSupportedGroups == null)
+        {
+            return selectDefaultCurve(minimumCurveBits);
+        }
+
+        boolean isFips = manager.getContext().isFips();
+
+        return SupportedGroups.getServerSelectedCurve(getCrypto(), isFips, minimumCurveBits, clientSupportedGroups);
+    }
+
+    @Override
+    protected int selectDefaultCurve(int minimumCurveBits)
+    {
+        return SupportedGroups.getServerDefaultCurve(manager.getContext().isFips(), minimumCurveBits);
+    }
+
+    @Override
+    protected TlsDHConfig selectDefaultDHConfig(int minimumFiniteFieldBits)
+    {
+        return SupportedGroups.getServerDefaultDHConfig(manager.getContext().isFips(), minimumFiniteFieldBits);
+    }
+
+    @Override
+    protected TlsDHConfig selectDHConfig(int minimumFiniteFieldBits)
+    {
+        minimumFiniteFieldBits = Math.max(minimumFiniteFieldBits, provEphemeralDHKeySize);
+
+        if (clientSupportedGroups == null)
+        {
+            return selectDefaultDHConfig(minimumFiniteFieldBits);
+        }
+
+        boolean isFips = manager.getContext().isFips();
+
+        int namedGroup = SupportedGroups.getServerSelectedFiniteField(getCrypto(), isFips, minimumFiniteFieldBits,
+            clientSupportedGroups);
+
+        return TlsDHUtils.createNamedDHConfig(namedGroup);
     }
 
     public synchronized boolean isHandshakeComplete()
@@ -71,12 +163,14 @@ class ProvTlsServer
         return handshakeComplete;
     }
 
+    @Override
     public TlsCredentials getCredentials()
         throws IOException
     {
         return credentials;
     }
 
+    @Override
     public int[] getCipherSuites()
     {
         return TlsUtils.getSupportedCipherSuites(manager.getContextData().getCrypto(),
@@ -132,6 +226,46 @@ class ProvTlsServer
         keyManagerMissCache = null;
 
         return selectedCipherSuite;
+    }
+
+    @Override
+    public Hashtable getServerExtensions() throws IOException
+    {
+        super.getServerExtensions();
+
+        /*
+         * TODO[jsse] RFC 6066 When resuming a session, the server MUST NOT include a server_name
+         * extension in the server hello.
+         */
+        if (matchedSNIServerName != null)
+        {
+            checkServerExtensions().put(TlsExtensionsUtils.EXT_server_name, TlsExtensionsUtils.createEmptyExtensionData());
+        }
+
+        return serverExtensions;
+    }
+
+    @Override
+    public TlsSession getSessionToResume(byte[] sessionID)
+    {
+        ProvSSLSessionContext sessionContext = manager.getContextData().getServerSessionContext();
+        this.sslSession = sessionContext.getSessionImpl(sessionID);
+
+        if (sslSession != null)
+        {
+            TlsSession sessionToResume = sslSession.getTlsSession();
+            if (sessionToResume != null)
+            {
+                return sessionToResume;
+            }
+        }
+
+        if (!manager.getEnableSessionCreation())
+        {
+            throw new IllegalStateException("No resumable sessions and session creation is disabled");
+        }
+
+        return null;
     }
 
     @Override
@@ -197,7 +331,10 @@ class ProvTlsServer
     public void notifyClientCertificate(Certificate clientCertificate) throws IOException
     {
         // NOTE: This method isn't called unless we returned non-null from getCertificateRequest() earlier
-        assert sslParameters.getNeedClientAuth() || sslParameters.getWantClientAuth();
+        if (!sslParameters.getNeedClientAuth() && !sslParameters.getWantClientAuth())
+        {
+            throw new TlsFatalAlert(AlertDescription.internal_error);
+        }
 
         boolean noClientCert = clientCertificate == null || clientCertificate.isEmpty();
         if (noClientCert)
@@ -209,9 +346,9 @@ class ProvTlsServer
         }
         else
         {
-            X509Certificate[] chain = JsseUtils.getX509CertificateChain(clientCertificate);
-            short clientCertificateType = clientCertificate.getCertificateAt(0).getClientCertificateType();
-            String authType = JsseUtils.getAuthTypeClient(clientCertificateType);
+            X509Certificate[] chain = JsseUtils.getX509CertificateChain(manager.getContextData().getCrypto(), clientCertificate);
+            short signatureAlgorithm = clientCertificate.getCertificateAt(0).getLegacySignatureAlgorithm();
+            String authType = JsseUtils.getAuthStringClient(signatureAlgorithm);
 
             if (!manager.isClientTrusted(chain, authType))
             {
@@ -229,11 +366,58 @@ class ProvTlsServer
     {
         this.handshakeComplete = true;
 
-        ProvSSLSessionContext sessionContext = manager.getContextData().getServerSessionContext();
-        SSLSession session = sessionContext.reportSession(context.getSession());
-        ProvSSLConnection connection = new ProvSSLConnection(context, session);
+        TlsSession handshakeSession = context.getSession();
 
-        manager.notifyHandshakeComplete(connection);
+        if (sslSession == null || sslSession.getTlsSession() != handshakeSession)
+        {
+            sslSession = manager.getContextData().getServerSessionContext().reportSession(handshakeSession, null, -1);
+        }
+
+        manager.notifyHandshakeComplete(new ProvSSLConnection(context, sslSession));
+    }
+
+    @Override
+    public void notifySecureRenegotiation(boolean secureRenegotiation) throws IOException
+    {
+        if (!secureRenegotiation)
+        {
+            boolean allowLegacyHelloMessages = PropertyUtils.getBooleanSystemProperty("sun.security.ssl.allowLegacyHelloMessages", true);
+            if (!allowLegacyHelloMessages)
+            {
+                /*
+                 * RFC 5746 3.4/3.6. In this case, some clients/servers may want to terminate the handshake instead
+                 * of continuing; see Section 4.1/4.3 for discussion.
+                 */
+                throw new TlsFatalAlert(AlertDescription.handshake_failure);
+            }
+        }
+    }
+
+    @Override
+    public void processClientExtensions(Hashtable clientExtensions) throws IOException
+    {
+        super.processClientExtensions(clientExtensions);
+
+        if (clientExtensions != null)
+        {
+            /*
+             * TODO[jsse] RFC 6066 A server that implements this extension MUST NOT accept the
+             * request to resume the session if the server_name extension contains a different name.
+             */
+            Collection<BCSNIMatcher> sniMatchers = sslParameters.getSNIMatchers();
+            if (sniMatchers != null && !sniMatchers.isEmpty())
+            {
+                ServerNameList serverNameList = TlsExtensionsUtils.getServerNameExtension(clientExtensions);
+                if (serverNameList != null)
+                {
+                    matchedSNIServerName = JsseUtils.findMatchingSNIServerName(serverNameList, sniMatchers);
+                    if (matchedSNIServerName == null)
+                    {
+                        throw new TlsFatalAlert(AlertDescription.unrecognized_name);
+                    }
+                }
+            }
+        }
     }
 
     protected boolean selectCredentials(int cipherSuite) throws IOException
@@ -296,7 +480,9 @@ class ProvTlsServer
         PrivateKey privateKey = km.getPrivateKey(alias);
         Certificate certificate = JsseUtils.getCertificateMessage(crypto, km.getCertificateChain(alias));
 
-        if (privateKey == null || certificate.isEmpty())
+        if (privateKey == null
+            || !JsseUtils.isUsableKeyForServer(keyExchangeAlgorithm, privateKey)
+            || certificate.isEmpty())
         {
             keyManagerMissCache.add(keyType);
             return false;
@@ -325,7 +511,7 @@ class ProvTlsServer
         case KeyExchangeAlgorithm.ECDHE_ECDSA:
         case KeyExchangeAlgorithm.ECDHE_RSA:
         {
-            short signatureAlgorithm = TlsUtils.getSignatureAlgorithm(keyExchangeAlgorithm);
+            short signatureAlgorithm = TlsUtils.getLegacySignatureAlgorithmServer(keyExchangeAlgorithm);
             SignatureAndHashAlgorithm sigAlg = TlsUtils.chooseSignatureAndHashAlgorithm(context,
                 supportedSignatureAlgorithms, signatureAlgorithm);
 

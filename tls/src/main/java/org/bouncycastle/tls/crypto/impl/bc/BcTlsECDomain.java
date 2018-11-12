@@ -15,7 +15,7 @@ import org.bouncycastle.crypto.params.ECPrivateKeyParameters;
 import org.bouncycastle.crypto.params.ECPublicKeyParameters;
 import org.bouncycastle.math.ec.ECPoint;
 import org.bouncycastle.tls.AlertDescription;
-import org.bouncycastle.tls.NamedCurve;
+import org.bouncycastle.tls.NamedGroup;
 import org.bouncycastle.tls.TlsFatalAlert;
 import org.bouncycastle.tls.crypto.TlsAgreement;
 import org.bouncycastle.tls.crypto.TlsECConfig;
@@ -27,18 +27,7 @@ import org.bouncycastle.util.BigIntegers;
  */
 public class BcTlsECDomain implements TlsECDomain
 {
-    protected BcTlsCrypto crypto;
-    protected TlsECConfig ecConfig;
-    protected ECDomainParameters ecDomain;
-
-    public BcTlsECDomain(BcTlsCrypto crypto, TlsECConfig ecConfig)
-    {
-        this.crypto = crypto;
-        this.ecConfig = ecConfig;
-        this.ecDomain = getParameters(ecConfig);
-    }
-
-    public byte[] calculateECDHAgreement(ECPublicKeyParameters publicKey, ECPrivateKeyParameters privateKey)
+    public static byte[] calculateBasicAgreement(ECPrivateKeyParameters privateKey, ECPublicKeyParameters publicKey)
     {
         ECDHBasicAgreement basicAgreement = new ECDHBasicAgreement();
         basicAgreement.init(privateKey);
@@ -52,6 +41,56 @@ public class BcTlsECDomain implements TlsECDomain
         return BigIntegers.asUnsignedByteArray(basicAgreement.getFieldSize(), agreementValue);
     }
 
+    public static ECDomainParameters getDomainParameters(TlsECConfig ecConfig)
+    {
+        return getDomainParameters(ecConfig.getNamedGroup());
+    }
+
+    public static ECDomainParameters getDomainParameters(int namedGroup)
+    {
+        if (!NamedGroup.refersToASpecificCurve(namedGroup))
+        {
+            return null;
+        }
+
+        String curveName = NamedGroup.getName(namedGroup);
+        if (curveName == null)
+        {
+            return null;
+        }
+
+        // Parameters are lazily created the first time a particular curve is accessed
+
+        X9ECParameters ecP = CustomNamedCurves.getByName(curveName);
+        if (ecP == null)
+        {
+            ecP = ECNamedCurveTable.getByName(curveName);
+            if (ecP == null)
+            {
+                return null;
+            }
+        }
+
+        // It's a bit inefficient to do this conversion every time
+        return new ECDomainParameters(ecP.getCurve(), ecP.getG(), ecP.getN(), ecP.getH(), ecP.getSeed());
+    }
+    
+    protected final BcTlsCrypto crypto;
+    protected final TlsECConfig ecConfig;
+    protected final ECDomainParameters ecDomainParameters;
+
+    public BcTlsECDomain(BcTlsCrypto crypto, TlsECConfig ecConfig)
+    {
+        this.crypto = crypto;
+        this.ecConfig = ecConfig;
+        this.ecDomainParameters = getDomainParameters(ecConfig);
+    }
+
+    public BcTlsSecret calculateECDHAgreement(ECPrivateKeyParameters privateKey, ECPublicKeyParameters publicKey)
+    {
+        return crypto.adoptLocalSecret(calculateBasicAgreement(privateKey, publicKey));
+    }
+
     public TlsAgreement createECDH()
     {
         return new BcTlsECDH(this);
@@ -59,7 +98,7 @@ public class BcTlsECDomain implements TlsECDomain
 
     public ECPoint decodePoint(byte[] encoding) throws IOException
     {
-        return ecDomain.getCurve().decodePoint(encoding);
+        return ecDomainParameters.getCurve().decodePoint(encoding);
     }
 
     public ECPublicKeyParameters decodePublicKey(byte[] encoding) throws IOException
@@ -68,9 +107,7 @@ public class BcTlsECDomain implements TlsECDomain
         {
             ECPoint point = decodePoint(encoding);
 
-            // TODO Check RFCs for any validation that could/should be done here
-
-            return new ECPublicKeyParameters(point, ecDomain);
+            return new ECPublicKeyParameters(point, ecDomainParameters);
         }
         catch (RuntimeException e)
         {
@@ -91,41 +128,7 @@ public class BcTlsECDomain implements TlsECDomain
     public AsymmetricCipherKeyPair generateKeyPair()
     {
         ECKeyPairGenerator keyPairGenerator = new ECKeyPairGenerator();
-        keyPairGenerator.init(new ECKeyGenerationParameters(ecDomain, crypto.getSecureRandom()));
+        keyPairGenerator.init(new ECKeyGenerationParameters(ecDomainParameters, crypto.getSecureRandom()));
         return keyPairGenerator.generateKeyPair();
-    }
-
-    public BcTlsCrypto getCrypto()
-    {
-        return crypto;
-    }
-
-    public ECDomainParameters getParameters(TlsECConfig ecConfig)
-    {
-        return getParametersForNamedCurve(ecConfig.getNamedCurve());
-    }
-
-    public ECDomainParameters getParametersForNamedCurve(int namedCurve)
-    {
-        String curveName = NamedCurve.getNameOfSpecificCurve(namedCurve);
-        if (curveName == null)
-        {
-            return null;
-        }
-
-        // Parameters are lazily created the first time a particular curve is accessed
-
-        X9ECParameters ecP = CustomNamedCurves.getByName(curveName);
-        if (ecP == null)
-        {
-            ecP = ECNamedCurveTable.getByName(curveName);
-            if (ecP == null)
-            {
-                return null;
-            }
-        }
-
-        // It's a bit inefficient to do this conversion every time
-        return new ECDomainParameters(ecP.getCurve(), ecP.getG(), ecP.getN(), ecP.getH(), ecP.getSeed());
     }
 }

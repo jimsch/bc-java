@@ -2,11 +2,14 @@ package org.bouncycastle.tls;
 
 import org.bouncycastle.tls.crypto.TlsSecret;
 
+/**
+ * Carrier class for general security parameters.
+ */
 public class SecurityParameters
 {
     int entity = -1;
     int cipherSuite = -1;
-    short compressionAlgorithm = CompressionMethod._null;
+    final short compressionAlgorithm = CompressionMethod._null;
     short maxFragmentLength = -1;
     int prfAlgorithm = -1;
     int verifyDataLength = -1;
@@ -16,10 +19,13 @@ public class SecurityParameters
     byte[] sessionHash = null;
     byte[] pskIdentity = null;
     byte[] srpIdentity = null;
+    byte[] tlsServerEndPoint = null;
     byte[] tlsUnique = null;
     boolean encryptThenMAC = false;
     boolean extendedMasterSecret = false;
+    boolean extendedPadding = false;
     boolean truncatedHMac = false;
+    ProtocolName applicationProtocol = null;
 
     void clear()
     {
@@ -113,6 +119,11 @@ public class SecurityParameters
         return srpIdentity;
     }
 
+    public byte[] getTLSServerEndPoint()
+    {
+        return tlsServerEndPoint;
+    }
+
     public byte[] getTLSUnique()
     {
         return tlsUnique;
@@ -128,8 +139,18 @@ public class SecurityParameters
         return extendedMasterSecret;
     }
 
+    public boolean isExtendedPadding()
+    {
+        return extendedPadding;
+    }
+
     public boolean isTruncatedHMac()
     {
         return truncatedHMac;
+    }
+
+    public ProtocolName getApplicationProtocol()
+    {
+        return applicationProtocol;
     }
 }

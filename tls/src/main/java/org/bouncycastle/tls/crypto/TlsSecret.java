@@ -11,44 +11,28 @@ import org.bouncycastle.tls.MACAlgorithm;
 public interface TlsSecret
 {
     /**
-     * Derive a new SSL key block using the passed in seed.
-     *
-     * @param seed the joint random value.
-     * @param length the length (in bytes) required.
-     * @return the newly derived secret.
-     */
-    TlsSecret deriveSSLKeyBlock(byte[] seed, int length);
-
-    /**
-     * Derive a new SSL master secret using the passed in seed.
-     *
-     * @param seed the session hash or joint random value.
-     * @return the newly derived secret.
-     */
-    TlsSecret deriveSSLMasterSecret(byte[] seed);
-
-    /**
      * Return a new secret based on applying a PRF to this one.
      *
      * @param prfAlgorithm PRF algorithm to use.
-     * @param labelSeed the appropriate concatenation of the label and seed details
+     * @param label the label details.
+     * @param seed the seed details.
      * @param length the size (in bytes) of the secret to generate.
      * @return the new secret.
      */
-    TlsSecret deriveUsingPRF(int prfAlgorithm, byte[] labelSeed, int length);
+    TlsSecret deriveUsingPRF(int prfAlgorithm, String label, byte[] seed, int length);
 
     /**
      * Create a cipher suite that matches the passed in encryption algorithm and mac algorithm.
      * <p>
      * See enumeration classes {@link EncryptionAlgorithm}, {@link MACAlgorithm} for appropriate argument values.
      * </p>
-     * @param contextParams context specific parameters.
+     * @param cryptoParams context specific parameters.
      * @param encryptionAlgorithm the encryption algorithm to be employed by the cipher suite.
      * @param macAlgorithm  the MAC algorithm to be employed by the cipher suite.
      * @return a TlsCipherSuite supporting the encryption and mac algorithm.
      * @throws IOException
      */
-    TlsCipher createCipher(TlsCryptoParameters contextParams, int encryptionAlgorithm, int macAlgorithm) throws IOException;
+    TlsCipher createCipher(TlsCryptoParameters cryptoParams, int encryptionAlgorithm, int macAlgorithm) throws IOException;
 
     /**
      * Destroy the internal state of the secret. After this call, any attempt to use the

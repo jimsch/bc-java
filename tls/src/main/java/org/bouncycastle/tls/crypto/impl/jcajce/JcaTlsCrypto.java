@@ -2,24 +2,27 @@ package org.bouncycastle.tls.crypto.impl.jcajce;
 
 import java.io.IOException;
 import java.math.BigInteger;
-import java.security.AlgorithmParameters;
 import java.security.GeneralSecurityException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.ECGenParameterSpec;
-import java.security.spec.ECParameterSpec;
+import java.util.Hashtable;
 
 import javax.crypto.Cipher;
+import javax.crypto.KeyAgreement;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.bouncycastle.asn1.x509.KeyUsage;
 import org.bouncycastle.jcajce.util.JcaJceHelper;
 import org.bouncycastle.tls.AlertDescription;
-import org.bouncycastle.tls.CombinedHash;
 import org.bouncycastle.tls.EncryptionAlgorithm;
 import org.bouncycastle.tls.HashAlgorithm;
 import org.bouncycastle.tls.MACAlgorithm;
-import org.bouncycastle.tls.NamedCurve;
+import org.bouncycastle.tls.NamedGroup;
 import org.bouncycastle.tls.ProtocolVersion;
+import org.bouncycastle.tls.SignatureAlgorithm;
 import org.bouncycastle.tls.SignatureAndHashAlgorithm;
 import org.bouncycastle.tls.TlsFatalAlert;
 import org.bouncycastle.tls.TlsUtils;
@@ -34,14 +37,13 @@ import org.bouncycastle.tls.crypto.TlsECConfig;
 import org.bouncycastle.tls.crypto.TlsECDomain;
 import org.bouncycastle.tls.crypto.TlsHMAC;
 import org.bouncycastle.tls.crypto.TlsHash;
-import org.bouncycastle.tls.crypto.TlsMAC;
+import org.bouncycastle.tls.crypto.TlsNonceGenerator;
 import org.bouncycastle.tls.crypto.TlsSRP6Client;
 import org.bouncycastle.tls.crypto.TlsSRP6Server;
 import org.bouncycastle.tls.crypto.TlsSRP6VerifierGenerator;
 import org.bouncycastle.tls.crypto.TlsSRPConfig;
 import org.bouncycastle.tls.crypto.TlsSecret;
 import org.bouncycastle.tls.crypto.impl.AbstractTlsCrypto;
-import org.bouncycastle.tls.crypto.impl.ChaCha20Poly1305Cipher;
 import org.bouncycastle.tls.crypto.impl.TlsAEADCipher;
 import org.bouncycastle.tls.crypto.impl.TlsAEADCipherImpl;
 import org.bouncycastle.tls.crypto.impl.TlsBlockCipher;
@@ -49,12 +51,11 @@ import org.bouncycastle.tls.crypto.impl.TlsBlockCipherImpl;
 import org.bouncycastle.tls.crypto.impl.TlsEncryptor;
 import org.bouncycastle.tls.crypto.impl.TlsImplUtils;
 import org.bouncycastle.tls.crypto.impl.TlsNullCipher;
-import org.bouncycastle.tls.crypto.impl.TlsStreamCipher;
-import org.bouncycastle.tls.crypto.impl.TlsStreamCipherImpl;
 import org.bouncycastle.tls.crypto.impl.jcajce.srp.SRP6Client;
 import org.bouncycastle.tls.crypto.impl.jcajce.srp.SRP6Server;
 import org.bouncycastle.tls.crypto.impl.jcajce.srp.SRP6VerifierGenerator;
 import org.bouncycastle.util.Arrays;
+import org.bouncycastle.util.Integers;
 
 /**
  * Class for providing cryptographic services for TLS based on implementations in the JCA/JCE.
@@ -70,7 +71,7 @@ public class JcaTlsCrypto
     private final SecureRandom entropySource;
     private final SecureRandom nonceEntropySource;
 
-    private final Boolean[]    supportedCurveIDs = new Boolean[28 + 1];  // current max curveID + 1
+    private final Hashtable supportedGroups = new Hashtable();
 
     /**
      * Base constructor.
@@ -84,41 +85,6 @@ public class JcaTlsCrypto
         this.helper = helper;
         this.entropySource = entropySource;
         this.nonceEntropySource = nonceEntropySource;
-    }
-
-    private boolean checkCurve(int namedCurve)
-    {
-        String curveName = NamedCurve.getNameOfSpecificCurve(namedCurve);
-        if (curveName == null)
-        {
-             return false;
-        }
-
-        if (namedCurve < supportedCurveIDs.length && supportedCurveIDs[namedCurve] != null)
-        {
-            return supportedCurveIDs[namedCurve].booleanValue();
-        }
-
-        try
-        {
-            AlgorithmParameters params = this.getHelper().createAlgorithmParameters("EC");
-
-            params.init(new ECGenParameterSpec(curveName));
-
-            boolean supported = params.getParameterSpec(ECParameterSpec.class) != null;
-            if (namedCurve < supportedCurveIDs.length)
-            {
-                supportedCurveIDs[namedCurve] = Boolean.valueOf(supported);
-            }
-
-            return supported;
-        }
-        catch (Exception e)
-        {
-            supportedCurveIDs[namedCurve] = Boolean.valueOf(false);
-
-            return false;
-        }
     }
 
     JceTlsSecret adoptLocalSecret(byte[] data)
@@ -138,13 +104,9 @@ public class JcaTlsCrypto
         }
     }
 
-    public byte[] createNonce(int size)
+    public TlsNonceGenerator createNonceGenerator(byte[] additionalSeedMaterial)
     {
-        byte[] nonce = new byte[size];
-
-        nonceEntropySource.nextBytes(nonce);
-
-        return nonce;
+        return new JcaNonceGenerator(nonceEntropySource, additionalSeedMaterial);
     }
 
     public SecureRandom getSecureRandom()
@@ -152,10 +114,19 @@ public class JcaTlsCrypto
         return entropySource;
     }
 
+    public SecretKey calculateKeyAgreement(String agreementAlgorithm, PrivateKey privateKey, PublicKey publicKey, String secretAlgorithm)
+        throws GeneralSecurityException
+    {
+        KeyAgreement agreement = helper.createKeyAgreement(agreementAlgorithm);
+        agreement.init(privateKey);
+        agreement.doPhase(publicKey, true);
+        return agreement.generateSecret(secretAlgorithm);
+    }
+
     public TlsCertificate createCertificate(byte[] encoding)
         throws IOException
     {
-        return new JcaTlsCertificate(encoding, helper);
+        return new JcaTlsCertificate(this, encoding);
     }
 
     protected TlsCipher createCipher(TlsCryptoParameters cryptoParams, int encryptionAlgorithm, int macAlgorithm)
@@ -220,8 +191,6 @@ public class JcaTlsCrypto
                 return createChaCha20Poly1305(cryptoParams);
             case EncryptionAlgorithm.NULL:
                 return createNullCipher(cryptoParams, macAlgorithm);
-            case EncryptionAlgorithm.RC4_128:
-                return createRC4Cipher(cryptoParams, 16, macAlgorithm);
             case EncryptionAlgorithm.SEED_CBC:
                 return createSEEDCipher(cryptoParams, macAlgorithm);
             default:
@@ -234,32 +203,24 @@ public class JcaTlsCrypto
         }
     }
 
-    public final TlsHMAC createHMAC(int macAlgorithm)
-        throws IOException
+    public TlsHMAC createHMAC(int macAlgorithm)
     {
-        try
+        switch (macAlgorithm)
         {
-            switch (macAlgorithm)
-            {
-            case MACAlgorithm._null:
-                return null;
-            case MACAlgorithm.hmac_md5:
-                return createHMAC("HmacMD5");
-            case MACAlgorithm.hmac_sha1:
-                return createHMAC("HmacSHA1");
-            case MACAlgorithm.hmac_sha256:
-                return createHMAC("HmacSHA256");
-            case MACAlgorithm.hmac_sha384:
-                return createHMAC("HmacSHA384");
-            case MACAlgorithm.hmac_sha512:
-                return createHMAC("HmacSHA512");
-            default:
-                throw new TlsFatalAlert(AlertDescription.internal_error);
-            }
-        }
-        catch (GeneralSecurityException e)
-        {
-            throw new TlsCryptoException("cannot create HMAC: " + e.getMessage(), e);
+        case MACAlgorithm._null:
+            return null;
+        case MACAlgorithm.hmac_md5:
+            return createHMAC("HmacMD5");
+        case MACAlgorithm.hmac_sha1:
+            return createHMAC("HmacSHA1");
+        case MACAlgorithm.hmac_sha256:
+            return createHMAC("HmacSHA256");
+        case MACAlgorithm.hmac_sha384:
+            return createHMAC("HmacSHA384");
+        case MACAlgorithm.hmac_sha512:
+            return createHMAC("HmacSHA512");
+        default:
+            throw new IllegalArgumentException("unknown MACAlgorithm: " + MACAlgorithm.getText(macAlgorithm));
         }
     }
 
@@ -339,7 +300,10 @@ public class JcaTlsCrypto
 
     public boolean hasAllRawSignatureAlgorithms()
     {
-        return !JcaUtils.isSunMSCAPIProviderActive();
+        // TODO[RFC 8422] Revisit the need to buffer the handshake for "Intrinsic" hash signatures
+        return !JcaUtils.isSunMSCAPIProviderActive()
+            && !hasSignatureAlgorithm(SignatureAlgorithm.ed25519)
+            && !hasSignatureAlgorithm(SignatureAlgorithm.ed448);
     }
 
     public boolean hasDHAgreement()
@@ -390,6 +354,14 @@ public class JcaTlsCrypto
                 helper.createCipher("CAMELLIA/GCM/NoPadding");
                 break;
             }
+
+            case EncryptionAlgorithm.DES40_CBC:
+            case EncryptionAlgorithm.DES_CBC:
+            case EncryptionAlgorithm.IDEA_CBC:
+            case EncryptionAlgorithm.RC2_CBC_40:
+            case EncryptionAlgorithm.RC4_128:
+            case EncryptionAlgorithm.RC4_40:
+                return false;
             }
         }
         catch (GeneralSecurityException e)
@@ -411,9 +383,73 @@ public class JcaTlsCrypto
         return true;
     }
 
-    public boolean hasNamedCurve(int curveID)
+    public boolean hasNamedGroup(int namedGroup)
     {
-        return checkCurve(curveID);
+        // TODO[tls] Actually check for DH support for the individual groups
+        if (NamedGroup.refersToASpecificFiniteField(namedGroup))
+        {
+            return true;
+        }
+
+        if (!NamedGroup.refersToASpecificCurve(namedGroup))
+        {
+            return false;
+        }
+
+        String groupName = NamedGroup.getName(namedGroup);
+        if (groupName == null)
+        {
+            return false;
+        }
+
+        Integer key = Integers.valueOf(namedGroup);
+
+        synchronized (supportedGroups)
+        {
+            Boolean cached = (Boolean)supportedGroups.get(key);
+            if (cached != null)
+            {
+                return cached.booleanValue();
+            }
+        }
+
+        boolean result = true;
+        try
+        {
+            switch (namedGroup)
+            {
+            case NamedGroup.x25519:
+            {
+                helper.createKeyFactory("X25519");
+                helper.createKeyPairGenerator("X25519");
+                helper.createKeyAgreement("X25519");
+                break;
+            }
+            case NamedGroup.x448:
+            {
+                helper.createKeyFactory("X448");
+                helper.createKeyPairGenerator("X448");
+                helper.createKeyAgreement("X448");
+                break;
+            }
+            default:
+            {
+                result &= isCurveSupported(groupName);
+                break;
+            }
+            }
+        }
+        catch (GeneralSecurityException e)
+        {
+            result = false;
+        }
+
+        synchronized (supportedGroups)
+        {
+            supportedGroups.put(key, Boolean.valueOf(result));
+        }
+
+        return result;
     }
 
     public boolean hasRSAEncryption()
@@ -429,10 +465,25 @@ public class JcaTlsCrypto
         }
     }
 
-    public boolean hasSignatureAlgorithm(int signatureAlgorithm)
+    public boolean hasSignatureAlgorithm(short signatureAlgorithm)
     {
-        // TODO: expand
-        return true;
+        switch (signatureAlgorithm)
+        {
+        case SignatureAlgorithm.rsa:
+        case SignatureAlgorithm.dsa:
+        case SignatureAlgorithm.ecdsa:
+        case SignatureAlgorithm.ed25519:
+        case SignatureAlgorithm.ed448:
+        case SignatureAlgorithm.rsa_pss_rsae_sha256:
+        case SignatureAlgorithm.rsa_pss_rsae_sha384:
+        case SignatureAlgorithm.rsa_pss_rsae_sha512:
+        case SignatureAlgorithm.rsa_pss_pss_sha256:
+        case SignatureAlgorithm.rsa_pss_pss_sha384:
+        case SignatureAlgorithm.rsa_pss_pss_sha512:
+            return true;
+        default:
+            return false;
+        }
     }
 
     public boolean hasSignatureAndHashAlgorithm(SignatureAndHashAlgorithm sigAndHashAlgorithm)
@@ -445,8 +496,7 @@ public class JcaTlsCrypto
             return false;
         }
 
-        // TODO: expand
-        return true;
+        return hasSignatureAlgorithm(sigAndHashAlgorithm.getSignature());
     }
 
     public boolean hasSRPAuthentication()
@@ -486,18 +536,8 @@ public class JcaTlsCrypto
         }
         catch (GeneralSecurityException e)
         {
-            throw new IllegalArgumentException("unable to create message digest:" + e.getMessage(), e);
+            throw Exceptions.illegalArgumentException("unable to create message digest:" + e.getMessage(), e);
         }
-    }
-
-    public TlsHash createHash(final SignatureAndHashAlgorithm signatureAndHashAlgorithm)
-    {
-        if (signatureAndHashAlgorithm == null)
-        {
-            return new CombinedHash(this);
-        }
-
-        return createHash(signatureAndHashAlgorithm.getHash());
     }
 
     public TlsDHDomain createDHDomain(TlsDHConfig dhConfig)
@@ -507,13 +547,21 @@ public class JcaTlsCrypto
 
     public TlsECDomain createECDomain(TlsECConfig ecConfig)
     {
-        return new JceTlsECDomain(this, ecConfig);
+        switch (ecConfig.getNamedGroup())
+        {
+        case NamedGroup.x25519:
+            return new JceX25519Domain(this);
+        case NamedGroup.x448:
+            return new JceX448Domain(this);
+        default:
+            return new JceTlsECDomain(this, ecConfig);
+        }
     }
 
     public TlsEncryptor createEncryptor(TlsCertificate certificate)
         throws IOException
     {
-        JcaTlsCertificate jcaCert = JcaTlsCertificate.convert(certificate, this.getHelper());
+        JcaTlsCertificate jcaCert = JcaTlsCertificate.convert(this, certificate);
         jcaCert.validateKeyUsage(KeyUsage.keyEncipherment);
 
         final RSAPublicKey pubKeyRSA = jcaCert.getPubKeyRSA();
@@ -526,8 +574,26 @@ public class JcaTlsCrypto
                 try
                 {
                     Cipher c = createRSAEncryptionCipher();
-                    c.init(Cipher.ENCRYPT_MODE, pubKeyRSA, getSecureRandom());
-                    return c.doFinal(input, inOff, length);
+                    // try wrap mode first - strictly speaking this is the correct one to use.
+                    try
+                    {
+                        c.init(Cipher.WRAP_MODE, pubKeyRSA, getSecureRandom());
+                        return c.wrap(new SecretKeySpec(input, inOff, length, "TLS"));
+                    }
+                    catch (Exception e)
+                    {
+                        try
+                        {
+                            // okay, maybe the provider does not support wrap mode.
+                            c.init(Cipher.ENCRYPT_MODE, pubKeyRSA, getSecureRandom());
+                            return c.doFinal(input, inOff, length);
+                        }
+                        catch (Exception ex)
+                        {
+                            // okay, if we get here let's rethrow the original one.
+                            throw new TlsFatalAlert(AlertDescription.internal_error, e);
+                        }
+                    }
                 }
                 catch (GeneralSecurityException e)
                 {
@@ -553,7 +619,7 @@ public class JcaTlsCrypto
     protected TlsAEADCipherImpl createAEADCipher(String cipherName, String algorithm, int keySize, boolean isEncrypting)
         throws GeneralSecurityException
     {
-        return new JceAEADCipherImpl(helper.createCipher(cipherName), algorithm, isEncrypting);
+        return new JceAEADCipherImpl(helper, cipherName, algorithm, keySize, isEncrypting);
     }
 
     /**
@@ -569,11 +635,11 @@ public class JcaTlsCrypto
     protected TlsBlockCipherImpl createBlockCipher(String cipherName, String algorithm, int keySize, boolean isEncrypting)
         throws GeneralSecurityException
     {
-        return new JceBlockCipherImpl(helper.createCipher(cipherName), algorithm, isEncrypting);
+        return new JceBlockCipherImpl(helper.createCipher(cipherName), algorithm, keySize, isEncrypting);
     }
 
     /**
-     * If you want to create your own versions of the block ciphers for < TLS 1.1, override this method.
+     * If you want to create your own versions of the block ciphers for &lt; TLS 1.1, override this method.
      *
      * @param cipherName   the full name of the cipher (algorithm/mode/padding)
      * @param algorithm    the base algorithm name
@@ -589,45 +655,21 @@ public class JcaTlsCrypto
     }
 
     /**
-     * If you want to create your own versions of stream ciphers, override this method.
-     *
-     * @param cipherName   the full name of the cipher (algorithm/mode/padding)
-     * @param algorithm    the base algorithm name
-     * @param keySize      keySize (in bytes) for the cipher key.
-     * @param isEncrypting true if the cipher is for encryption, false otherwise.
-     * @return a block cipher.
-     * @throws GeneralSecurityException in case of failure.
-     */
-    protected TlsStreamCipherImpl createStreamCipher(String cipherName, String algorithm, int keySize, boolean isEncrypting)
-        throws GeneralSecurityException
-    {
-        return new JceStreamCipherImpl(helper.createCipher(cipherName), algorithm, isEncrypting);
-    }
-
-    /**
      * If you want to create your own versions of HMACs, override this method.
      *
      * @param hmacName the name of the HMAC required.
      * @return a HMAC calculator.
-     * @throws GeneralSecurityException in case of failure.
      */
     protected TlsHMAC createHMAC(String hmacName)
-        throws GeneralSecurityException
     {
-        return new JceTlsHMAC(helper.createMac(hmacName), hmacName);
-    }
-
-    /**
-     * If you want to create your own versions of MACs, override this method.
-     *
-     * @param macName the name of the MAC required.
-     * @return a MAC calculator.
-     * @throws GeneralSecurityException in case of failure.
-     */
-    protected TlsMAC createMAC(String macName)
-        throws GeneralSecurityException
-    {
-        return new JceTlsMAC(helper.createMac(macName), macName);
+        try
+        {
+            return new JceTlsHMAC(helper.createMac(hmacName), hmacName);
+        }
+        catch (GeneralSecurityException e)
+        {
+            throw new RuntimeException("cannot create HMAC: " + hmacName, e);
+        }
     }
 
     /**
@@ -654,10 +696,15 @@ public class JcaTlsCrypto
     protected TlsNullCipher createNullCipher(TlsCryptoParameters cryptoParams, int macAlgorithm)
         throws IOException, GeneralSecurityException
     {
-        return new TlsNullCipher(cryptoParams, createMAC(cryptoParams, macAlgorithm), createMAC(cryptoParams, macAlgorithm));
+        return new TlsNullCipher(cryptoParams, createMAC(macAlgorithm), createMAC(macAlgorithm));
     }
 
-    JcaJceHelper getHelper()
+    protected boolean isCurveSupported(String curveName)
+    {
+        return ECUtil.isCurveSupported(curveName, this.getHelper());
+    }
+
+    public JcaJceHelper getHelper()
     {
         return helper;
     }
@@ -666,35 +713,35 @@ public class JcaTlsCrypto
         throws IOException, GeneralSecurityException
     {
         return new TlsBlockCipher(this, cryptoParams, createCBCBlockOperator(cryptoParams, "AES", true, cipherKeySize), createCBCBlockOperator(cryptoParams, "AES", false, cipherKeySize),
-            createMAC(cryptoParams, macAlgorithm), createMAC(cryptoParams, macAlgorithm), cipherKeySize);
+            createMAC(macAlgorithm), createMAC(macAlgorithm), cipherKeySize);
     }
 
     private TlsBlockCipher createARIACipher(TlsCryptoParameters cryptoParams, int cipherKeySize, int macAlgorithm)
         throws IOException, GeneralSecurityException
     {
         return new TlsBlockCipher(this, cryptoParams, createCBCBlockOperator(cryptoParams, "ARIA", true, cipherKeySize), createCBCBlockOperator(cryptoParams, "ARIA", false, cipherKeySize),
-            createMAC(cryptoParams, macAlgorithm), createMAC(cryptoParams, macAlgorithm), cipherKeySize);
+            createMAC(macAlgorithm), createMAC(macAlgorithm), cipherKeySize);
     }
 
     private TlsBlockCipher createCamelliaCipher(TlsCryptoParameters cryptoParams, int cipherKeySize, int macAlgorithm)
         throws IOException, GeneralSecurityException
     {
         return new TlsBlockCipher(this, cryptoParams, createCBCBlockOperator(cryptoParams, "Camellia", true, cipherKeySize), createCBCBlockOperator(cryptoParams, "Camellia", false, cipherKeySize),
-            createMAC(cryptoParams, macAlgorithm), createMAC(cryptoParams, macAlgorithm), cipherKeySize);
+            createMAC(macAlgorithm), createMAC(macAlgorithm), cipherKeySize);
     }
 
     private TlsBlockCipher createDESedeCipher(TlsCryptoParameters cryptoParams, int macAlgorithm)
         throws IOException, GeneralSecurityException
     {
         return new TlsBlockCipher(this, cryptoParams, createCBCBlockOperator(cryptoParams, "DESede", true, 24), createCBCBlockOperator(cryptoParams, "DESede", false, 24),
-            createMAC(cryptoParams, macAlgorithm), createMAC(cryptoParams, macAlgorithm), 24);
+            createMAC(macAlgorithm), createMAC(macAlgorithm), 24);
     }
 
     private TlsBlockCipher createSEEDCipher(TlsCryptoParameters cryptoParams, int macAlgorithm)
         throws IOException, GeneralSecurityException
     {
         return new TlsBlockCipher(this, cryptoParams, createCBCBlockOperator(cryptoParams, "SEED", true, 16), createCBCBlockOperator(cryptoParams, "SEED", false, 16),
-            createMAC(cryptoParams, macAlgorithm), createMAC(cryptoParams, macAlgorithm), 16);
+            createMAC(macAlgorithm), createMAC(macAlgorithm), 16);
     }
 
     private TlsBlockCipherImpl createCBCBlockOperator(TlsCryptoParameters cryptoParams, String algorithm, boolean forEncryption, int keySize)
@@ -712,25 +759,16 @@ public class JcaTlsCrypto
         }
     }
 
-    private TlsHMAC createMAC(TlsCryptoParameters cryptoParams, int macAlgorithm)
-        throws GeneralSecurityException, IOException
+    private TlsHMAC createMAC(int macAlgorithm) throws IOException
     {
-        if (TlsImplUtils.isSSL(cryptoParams))
-        {
-            return createSSL3HMAC(macAlgorithm);
-        }
-        else
-        {
-            return createHMAC(macAlgorithm);
-        }
+        return createHMAC(macAlgorithm);
     }
 
     private TlsCipher createChaCha20Poly1305(TlsCryptoParameters cryptoParams)
         throws IOException, GeneralSecurityException
     {
-        return new ChaCha20Poly1305Cipher(cryptoParams,
-            createStreamCipher("ChaCha7539", "ChaCha7539", 32, true), createStreamCipher("ChaCha7539", "ChaCha7539", 32, false),
-            createMAC("Poly1305"), createMAC("Poly1305"));
+        return new TlsAEADCipher(cryptoParams, new JceChaCha20Poly1305(helper, true),
+            new JceChaCha20Poly1305(helper, false), 32, 16, TlsAEADCipher.NONCE_RFC7905);
     }
 
     private TlsAEADCipher createCipher_AES_CCM(TlsCryptoParameters cryptoParams, int cipherKeySize, int macSize)
@@ -768,39 +806,10 @@ public class JcaTlsCrypto
             cipherKeySize, macSize);
     }
 
-    private TlsStreamCipher createRC4Cipher(TlsCryptoParameters cryptoParams, int cipherKeySize, int macAlgorithm)
-        throws IOException, GeneralSecurityException
-    {
-        return new TlsStreamCipher(cryptoParams, createStreamCipher("RC4", "RC4", 128, true), createStreamCipher("RC4", "RC4", 128, false),
-            createMAC(cryptoParams, macAlgorithm), createMAC(cryptoParams, macAlgorithm), cipherKeySize, false);
-    }
-
-    private TlsHMAC createSSL3HMAC(int macAlgorithm)
-        throws IOException, GeneralSecurityException
-    {
-        switch (macAlgorithm)
-        {
-        case MACAlgorithm._null:
-            return null;
-        case MACAlgorithm.hmac_md5:
-            return new SSL3Mac(createHash(getDigestName(HashAlgorithm.md5)), 16, 64);
-        case MACAlgorithm.hmac_sha1:
-            return new SSL3Mac(createHash(getDigestName(HashAlgorithm.sha1)), 20, 64);
-        case MACAlgorithm.hmac_sha256:
-            return new SSL3Mac(createHash(getDigestName(HashAlgorithm.sha256)), 32, 64);
-        case MACAlgorithm.hmac_sha384:
-            return new SSL3Mac(createHash(getDigestName(HashAlgorithm.sha384)), 48, 128);
-        case MACAlgorithm.hmac_sha512:
-            return new SSL3Mac(createHash(getDigestName(HashAlgorithm.sha512)), 64, 128);
-        default:
-            throw new TlsFatalAlert(AlertDescription.internal_error);
-        }
-    }
-
-    String getDigestName(short algorithm)
+    String getDigestName(short hashAlgorithm)
     {
         String digestName;
-        switch (algorithm)
+        switch (hashAlgorithm)
         {
         case HashAlgorithm.md5:
             digestName = "MD5";
@@ -821,110 +830,8 @@ public class JcaTlsCrypto
             digestName = "SHA-512";
             break;
         default:
-            throw new IllegalArgumentException("unknown HashAlgorithm");
+            throw new IllegalArgumentException("invalid HashAlgorithm: " + HashAlgorithm.getText(hashAlgorithm));
         }
         return digestName;
-    }
-
-    /**
-     * HMAC implementation based on original internet draft for HMAC (RFC 2104)
-     * <p/>
-     * The difference is that padding is concatenated versus XORed with the key
-     * <p/>
-     * H(K + opad, H(K + ipad, text))
-     */
-    private static class SSL3Mac
-        implements TlsHMAC
-    {
-        private static final byte IPAD_BYTE = (byte)0x36;
-        private static final byte OPAD_BYTE = (byte)0x5C;
-
-        private static final byte[] IPAD = genPad(IPAD_BYTE, 48);
-        private static final byte[] OPAD = genPad(OPAD_BYTE, 48);
-
-        private TlsHash digest;
-        private final int digestSize;
-        private final int internalBlockSize;
-        private int padLength;
-
-        private byte[] secret;
-
-        /**
-         * Base constructor for one of the standard digest algorithms that the byteLength of
-         * the algorithm is know for. Behaviour is undefined for digests other than MD5 or SHA1.
-         *
-         * @param digest            the digest.
-         * @param digestSize        the digest size.
-         * @param internalBlockSize the digest internal block size.
-         */
-        public SSL3Mac(TlsHash digest, int digestSize, int internalBlockSize)
-        {
-            this.digest = digest;
-            this.digestSize = digestSize;
-            this.internalBlockSize = internalBlockSize;
-
-            if (digestSize == 20)
-            {
-                this.padLength = 40;
-            }
-            else
-            {
-                this.padLength = 48;
-            }
-        }
-
-        public void setKey(byte[] key)
-        {
-            this.secret = key;
-
-            reset();
-        }
-
-        public void update(byte[] in, int inOff, int len)
-        {
-            digest.update(in, inOff, len);
-        }
-
-        public byte[] calculateMAC()
-        {
-            byte[] tmp = digest.calculateHash();
-
-            digest.update(secret, 0, secret.length);
-            digest.update(OPAD, 0, padLength);
-            digest.update(tmp, 0, tmp.length);
-
-            byte[] rv = digest.calculateHash();
-
-            reset();
-
-            return rv;
-        }
-
-        public int getInternalBlockSize()
-        {
-            return internalBlockSize;
-        }
-
-        public int getMacLength()
-        {
-            return digestSize;
-        }
-
-        /**
-         * Reset the mac generator.
-         */
-        public void reset()
-        {
-            digest.reset();
-            digest.update(secret, 0, secret.length);
-            digest.update(IPAD, 0, padLength);
-        }
-
-        private static byte[] genPad(byte b, int count)
-        {
-            byte[] padding = new byte[count];
-            Arrays.fill(padding, b);
-            return padding;
-        }
     }
 }

@@ -4,6 +4,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Vector;
 
+import org.bouncycastle.tls.crypto.TlsCertificate;
+
+/**
+ * Base class for supporting a TLS key exchange implementation.
+ */
 public abstract class AbstractTlsKeyExchange
     implements TlsKeyExchange
 {
@@ -18,115 +23,81 @@ public abstract class AbstractTlsKeyExchange
         this.supportedSignatureAlgorithms = supportedSignatureAlgorithms;
     }
 
-    protected void checkServerCertSigAlg(Certificate serverCertificate) throws IOException
+    protected TlsCertificate checkSigAlgOfServerCerts(Certificate serverCertificate) throws IOException
     {
-        if (supportedSignatureAlgorithms == null)
+        if (context.getPeerOptions().isCheckSigAlgOfPeerCerts())
         {
-            /*
-             * TODO RFC 2246 7.4.2. Unless otherwise specified, the signing algorithm for the
-             * certificate must be the same as the algorithm for the certificate key.
-             */
-        }
-        else
-        {
-            /*
-             * TODO RFC 5246 7.4.2. If the client provided a "signature_algorithms" extension, then
-             * all certificates provided by the server MUST be signed by a hash/signature algorithm
-             * pair that appears in that extension.
-             */
-        }
-    }
+            for (int i = 0; i < serverCertificate.getLength(); ++i)
+            {
+                String sigAlgOID = serverCertificate.getCertificateAt(i).getSigAlgOID();
+                SignatureAndHashAlgorithm sigAndHashAlg = TlsUtils.getCertSigAndHashAlg(sigAlgOID);
 
-    protected DigitallySigned parseSignature(InputStream input) throws IOException
-    {
-        DigitallySigned signature = DigitallySigned.parse(context, input);
-        SignatureAndHashAlgorithm signatureAlgorithm = signature.getAlgorithm();
-        if (signatureAlgorithm != null)
-        {
-            TlsUtils.verifySupportedSignatureAlgorithm(supportedSignatureAlgorithms, signatureAlgorithm);
+                boolean valid = false;
+                if (null == sigAndHashAlg)
+                {
+                    // We don't recognize the 'signatureAlgorithm' of the certificate
+                }
+                else if (null == supportedSignatureAlgorithms)
+                {
+                    /*
+                     * RFC 4346 7.4.2. Unless otherwise specified, the signing algorithm for the
+                     * certificate MUST be the same as the algorithm for the certificate key.
+                     */
+                    int signatureAlgorithm = TlsUtils.getLegacySignatureAlgorithmServerCert(keyExchange);
+
+                    valid = (signatureAlgorithm == sigAndHashAlg.getSignature()); 
+                }
+                else
+                {
+                    /*
+                     * RFC 5246 7.4.2. If the client provided a "signature_algorithms" extension, then
+                     * all certificates provided by the server MUST be signed by a hash/signature algorithm
+                     * pair that appears in that extension.
+                     */
+                    valid = TlsUtils.containsSignatureAlgorithm(supportedSignatureAlgorithms, sigAndHashAlg);
+                }
+
+                if (!valid)
+                {
+                    throw new TlsFatalAlert(AlertDescription.certificate_unknown);
+                }
+            }
         }
-        return signature;
+
+        return serverCertificate.getCertificateAt(0);
     }
 
     public void init(TlsContext context)
     {
         this.context = context;
 
-        ProtocolVersion clientVersion = context.getClientVersion();
+        ProtocolVersion clientVersion = context.getClientVersion(), serverVersion = context.getServerVersion();
 
-        if (TlsUtils.isSignatureAlgorithmsExtensionAllowed(clientVersion))
+        if (null == supportedSignatureAlgorithms)
         {
-            /*
-             * RFC 5246 7.4.1.4.1. If the client does not send the signature_algorithms extension,
-             * the server MUST do the following:
-             * 
-             * - If the negotiated key exchange algorithm is one of (RSA, DHE_RSA, DH_RSA, RSA_PSK,
-             * ECDH_RSA, ECDHE_RSA), behave as if client had sent the value {sha1,rsa}.
-             * 
-             * - If the negotiated key exchange algorithm is one of (DHE_DSS, DH_DSS), behave as if
-             * the client had sent the value {sha1,dsa}.
-             * 
-             * - If the negotiated key exchange algorithm is one of (ECDH_ECDSA, ECDHE_ECDSA),
-             * behave as if the client had sent value {sha1,ecdsa}.
-             */
-            if (this.supportedSignatureAlgorithms == null)
+            if (TlsUtils.isSignatureAlgorithmsExtensionAllowed(serverVersion))
             {
-                switch (keyExchange)
-                {
-                case KeyExchangeAlgorithm.DH_DSS:
-                case KeyExchangeAlgorithm.DHE_DSS:
-                case KeyExchangeAlgorithm.SRP_DSS:
-                {
-                    this.supportedSignatureAlgorithms = TlsUtils.getDefaultDSSSignatureAlgorithms();
-                    break;
-                }
+                short signatureAlgorithm = TlsUtils.getLegacySignatureAlgorithmServerCert(keyExchange);
 
-                case KeyExchangeAlgorithm.ECDH_ECDSA:
-                case KeyExchangeAlgorithm.ECDHE_ECDSA:
-                {
-                    this.supportedSignatureAlgorithms = TlsUtils.getDefaultECDSASignatureAlgorithms();
-                    break;
-                }
-
-                case KeyExchangeAlgorithm.DH_RSA:
-                case KeyExchangeAlgorithm.DHE_RSA:
-                case KeyExchangeAlgorithm.ECDH_RSA:
-                case KeyExchangeAlgorithm.ECDHE_RSA:
-                case KeyExchangeAlgorithm.RSA:
-                case KeyExchangeAlgorithm.RSA_PSK:
-                case KeyExchangeAlgorithm.SRP_RSA:
-                {
-                    this.supportedSignatureAlgorithms = TlsUtils.getDefaultRSASignatureAlgorithms();
-                    break;
-                }
-
-                case KeyExchangeAlgorithm.DHE_PSK:
-                case KeyExchangeAlgorithm.ECDHE_PSK:
-                case KeyExchangeAlgorithm.PSK:
-                case KeyExchangeAlgorithm.SRP:
-                    break;
-
-                default:
-                    throw new IllegalStateException("unsupported key exchange algorithm");
-                }
+                this.supportedSignatureAlgorithms = TlsUtils.getDefaultSignatureAlgorithms(signatureAlgorithm);
             }
         }
-        else if (this.supportedSignatureAlgorithms != null)
+        else
         {
-            throw new IllegalStateException("supported_signature_algorithms not allowed for " + clientVersion);
+            if (!TlsUtils.isSignatureAlgorithmsExtensionAllowed(clientVersion))
+            {
+                throw new IllegalStateException("supported_signature_algorithms not allowed for " + clientVersion);
+            }
+            if (!TlsUtils.isSignatureAlgorithmsExtensionAllowed(serverVersion))
+            {
+                this.supportedSignatureAlgorithms = null;
+            }
         }
     }
 
     public void processServerCertificate(Certificate serverCertificate) throws IOException
     {
         throw new TlsFatalAlert(AlertDescription.internal_error);
-    }
-
-    public void processServerCredentials(TlsCredentials serverCredentials)
-        throws IOException
-    {
-        // TODO[tls-ops] Process the server certificate differently on the server side 
-        processServerCertificate(serverCredentials.getCertificate());
     }
 
     public boolean requiresServerKeyExchange()
@@ -162,9 +133,18 @@ public abstract class AbstractTlsKeyExchange
         }
     }
 
+    public short[] getClientCertificateTypes()
+    {
+        return null;
+    }
+
     public void skipClientCredentials()
         throws IOException
     {
+        if (TlsUtils.isStaticKeyAgreement(keyExchange))
+        {
+            throw new TlsFatalAlert(AlertDescription.unexpected_message);
+        }
     }
 
     public void processClientCertificate(Certificate clientCertificate)
@@ -177,5 +157,10 @@ public abstract class AbstractTlsKeyExchange
     {
         // Key exchange implementation MUST support client key exchange
         throw new TlsFatalAlert(AlertDescription.internal_error);
+    }
+
+    public boolean requiresCertificateVerify()
+    {
+        return !TlsUtils.isStaticKeyAgreement(keyExchange);
     }
 }

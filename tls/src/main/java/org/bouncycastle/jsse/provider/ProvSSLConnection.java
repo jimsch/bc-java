@@ -4,22 +4,40 @@ import javax.net.ssl.SSLSession;
 
 import org.bouncycastle.jsse.BCSSLConnection;
 import org.bouncycastle.tls.ChannelBinding;
+import org.bouncycastle.tls.ProtocolName;
 import org.bouncycastle.tls.TlsContext;
 
 class ProvSSLConnection
     implements BCSSLConnection
 {
     protected final TlsContext tlsContext;
-    protected final SSLSession session; 
+    protected final ProvSSLSessionImpl sessionImpl; 
 
-    ProvSSLConnection(TlsContext tlsContext, SSLSession session)
+    ProvSSLConnection(TlsContext tlsContext, ProvSSLSessionImpl sessionImpl)
     {
         this.tlsContext = tlsContext;
-        this.session = session;
+        this.sessionImpl = sessionImpl;
+    }
+
+    ProvSSLSessionImpl getSessionImpl()
+    {
+        return sessionImpl;
+    }
+
+    public String getApplicationProtocol()
+    {
+        ProtocolName applicationProtocol = tlsContext.getSecurityParameters().getApplicationProtocol();
+
+        return null == applicationProtocol ? "" : applicationProtocol.getUtf8Decoding();
     }
 
     public byte[] getChannelBinding(String channelBinding)
     {
+        if (channelBinding.equals("tls-server-end-point"))
+        {
+            return tlsContext.exportChannelBinding(ChannelBinding.tls_server_end_point);
+        }
+
         if (channelBinding.equals("tls-unique"))
         {
             return tlsContext.exportChannelBinding(ChannelBinding.tls_unique);
@@ -30,6 +48,6 @@ class ProvSSLConnection
 
     public SSLSession getSession()
     {
-        return session;
+        return sessionImpl.getExportSession();
     }
 }

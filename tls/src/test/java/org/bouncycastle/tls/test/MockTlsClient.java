@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.security.SecureRandom;
 import java.util.Hashtable;
+import java.util.Vector;
 
 import org.bouncycastle.asn1.x509.Certificate;
 import org.bouncycastle.tls.AlertDescription;
@@ -13,12 +14,14 @@ import org.bouncycastle.tls.ChannelBinding;
 import org.bouncycastle.tls.ClientCertificateType;
 import org.bouncycastle.tls.DefaultTlsClient;
 import org.bouncycastle.tls.MaxFragmentLength;
+import org.bouncycastle.tls.ProtocolName;
 import org.bouncycastle.tls.ProtocolVersion;
 import org.bouncycastle.tls.SignatureAlgorithm;
 import org.bouncycastle.tls.TlsAuthentication;
 import org.bouncycastle.tls.TlsCredentials;
 import org.bouncycastle.tls.TlsExtensionsUtils;
 import org.bouncycastle.tls.TlsFatalAlert;
+import org.bouncycastle.tls.TlsServerCertificate;
 import org.bouncycastle.tls.TlsSession;
 import org.bouncycastle.tls.crypto.TlsCertificate;
 import org.bouncycastle.tls.crypto.impl.bc.BcTlsCrypto;
@@ -35,6 +38,14 @@ class MockTlsClient
         super(new BcTlsCrypto(new SecureRandom()));
 
         this.session = session;
+    }
+
+    protected Vector getProtocolNames()
+    {
+        Vector protocolNames = new Vector();
+        protocolNames.addElement(ProtocolName.HTTP_1_1);
+        protocolNames.addElement(ProtocolName.HTTP_2_TLS);
+        return protocolNames;
     }
 
     public TlsSession getSessionToResume()
@@ -67,8 +78,6 @@ class MockTlsClient
     public Hashtable getClientExtensions() throws IOException
     {
         Hashtable clientExtensions = TlsExtensionsUtils.ensureExtensionsInitialised(super.getClientExtensions());
-        TlsExtensionsUtils.addEncryptThenMACExtension(clientExtensions);
-        TlsExtensionsUtils.addExtendedMasterSecretExtension(clientExtensions);
         {
             /*
              * NOTE: If you are copying test code, do not blindly set these extensions in your own client.
@@ -92,10 +101,10 @@ class MockTlsClient
     {
         return new TlsAuthentication()
         {
-            public void notifyServerCertificate(org.bouncycastle.tls.Certificate serverCertificate)
+            public void notifyServerCertificate(TlsServerCertificate serverCertificate)
                 throws IOException
             {
-                TlsCertificate[] chain = serverCertificate.getCertificateList();
+                TlsCertificate[] chain = serverCertificate.getCertificate().getCertificateList();
 
                 System.out.println("TLS client received server certificate chain of length " + chain.length);
                 for (int i = 0; i != chain.length; i++)
@@ -106,9 +115,13 @@ class MockTlsClient
                         + entry.getSubject() + ")");
                 }
 
-                boolean isEmpty = serverCertificate == null || serverCertificate.isEmpty();
+                boolean isEmpty = serverCertificate == null || serverCertificate.getCertificate() == null
+                    || serverCertificate.getCertificate().isEmpty();
                 if (isEmpty || !TlsTestUtils.isCertificateOneOf(context.getCrypto(), chain[0],
-                    new String[]{ "x509-server.pem", "x509-server-dsa.pem", "x509-server-ecdsa.pem"}))
+                    new String[]
+                    { "x509-server-dsa.pem", "x509-server-ecdh.pem", "x509-server-ecdsa.pem", "x509-server-ed25519.pem",
+                        "x509-server-rsa_pss_256.pem", "x509-server-rsa_pss_384.pem", "x509-server-rsa_pss_512.pem",
+                        "x509-server-rsa-enc.pem", "x509-server-rsa-sign.pem" }))
                 {
                     throw new TlsFatalAlert(AlertDescription.bad_certificate);
                 }
@@ -124,7 +137,7 @@ class MockTlsClient
                 }
 
                 return TlsTestUtils.loadSignerCredentials(context, certificateRequest.getSupportedSignatureAlgorithms(),
-                    SignatureAlgorithm.rsa, "x509-client.pem", "x509-client-key.pem");
+                    SignatureAlgorithm.rsa, "x509-client-rsa.pem", "x509-client-key-rsa.pem");
             }
         };
     }
@@ -133,8 +146,11 @@ class MockTlsClient
     {
         super.notifyHandshakeComplete();
 
-        byte[] tlsUnique = context.exportChannelBinding(ChannelBinding.tls_unique);
-        System.out.println("'tls-unique': " + Hex.toHexString(tlsUnique));
+        ProtocolName protocolName = context.getSecurityParameters().getApplicationProtocol();
+        if (protocolName != null)
+        {
+            System.out.println("Client ALPN: " + protocolName.getUtf8Decoding());
+        }
 
         TlsSession newSession = context.getResumableSession();
         if (newSession != null)
@@ -144,14 +160,25 @@ class MockTlsClient
 
             if (this.session != null && Arrays.areEqual(this.session.getSessionID(), newSessionID))
             {
-                System.out.println("Resumed session: " + hex);
+                System.out.println("Client resumed session: " + hex);
             }
             else
             {
-                System.out.println("Established session: " + hex);
+                System.out.println("Client established session: " + hex);
+
+                byte[] tlsServerEndPoint = context.exportChannelBinding(ChannelBinding.tls_server_end_point);
+                System.out.println("Client 'tls-server-end-point': " + hex(tlsServerEndPoint));
             }
+
+            byte[] tlsUnique = context.exportChannelBinding(ChannelBinding.tls_unique);
+            System.out.println("Client 'tls-unique': " + hex(tlsUnique));
 
             this.session = newSession;
         }
+    }
+
+    protected String hex(byte[] data)
+    {
+        return data == null ? "(null)" : Hex.toHexString(data);
     }
 }

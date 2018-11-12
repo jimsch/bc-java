@@ -3,7 +3,7 @@ package org.bouncycastle.tls;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.security.SecureRandom;
+import java.io.OutputStream;
 import java.util.Hashtable;
 import java.util.Vector;
 
@@ -11,16 +11,8 @@ import org.bouncycastle.util.Arrays;
 
 public abstract class DTLSProtocol
 {
-    protected final SecureRandom secureRandom;
-
-    protected DTLSProtocol(SecureRandom secureRandom)
+    protected DTLSProtocol()
     {
-        if (secureRandom == null)
-        {
-            throw new IllegalArgumentException("'secureRandom' cannot be null");
-        }
-
-        this.secureRandom = secureRandom;
     }
 
     protected void processFinished(byte[] body, byte[] expected_verify_data)
@@ -69,11 +61,20 @@ public abstract class DTLSProtocol
         return maxFragmentLength;
     }
 
+    /** @deprecated */
     protected static byte[] generateCertificate(Certificate certificate)
         throws IOException
     {
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
         certificate.encode(buf);
+        return buf.toByteArray();
+    }
+
+    protected static byte[] generateCertificate(TlsContext context, Certificate certificate, OutputStream endPointHash)
+        throws IOException
+    {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        certificate.encode(context, buf, endPointHash);
         return buf.toByteArray();
     }
 

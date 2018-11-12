@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.math.BigInteger;
 import java.security.SecureRandom;
 
+import org.bouncycastle.tls.HashAlgorithm;
 import org.bouncycastle.tls.MACAlgorithm;
+import org.bouncycastle.tls.NamedGroup;
 import org.bouncycastle.tls.ProtocolVersion;
 import org.bouncycastle.tls.SignatureAndHashAlgorithm;
 
@@ -60,11 +62,11 @@ public interface TlsCrypto
     boolean hasMacAlgorithm(int macAlgorithm);
 
     /**
-     * Return true if this TlsCrypto supports the passed in curveID.
+     * Return true if this TlsCrypto supports the passed in {@link NamedGroup named group} value.
      *
-     * @return true if this instance supports the passed in curveID, false otherwise.
+     * @return true if this instance supports the passed in {@link NamedGroup named group} value.
      */
-    boolean hasNamedCurve(int curveID);
+    boolean hasNamedGroup(int namedGroup);
 
     /**
      * Return true if this TlsCrypto can support RSA encryption/decryption.
@@ -80,7 +82,7 @@ public interface TlsCrypto
      * @param signatureAlgorithm the algorithm of interest.
      * @return true if signatureAlgorithm is supported, false otherwise.
      */
-    boolean hasSignatureAlgorithm(int signatureAlgorithm);
+    boolean hasSignatureAlgorithm(short signatureAlgorithm);
 
     /**
      * Return true if this TlsCrypto can support the passed in signature algorithm.
@@ -155,20 +157,15 @@ public interface TlsCrypto
     TlsSecret adoptSecret(TlsSecret secret);
 
     /**
-     * Create a suitable hash for the signature algorithm identifier passed in.
-     *
-     * @param sidAlgorithm the signature algorithm the hash needs to match.
-     * @return a TlsHash.
-     */
-    TlsHash createHash(SignatureAndHashAlgorithm sidAlgorithm);
-
-    /**
      * Create a suitable hash for the hash algorithm identifier passed in.
+     * <p>
+     * See enumeration class {@link HashAlgorithm} for appropriate argument values.
+     * </p>
      *
-     * @param algorithm the hash algorithm the hash needs to implement.
-     * @return a TlsHash.
+     * @param hashAlgorithm the hash algorithm the hash needs to implement.
+     * @return a {@link TlsHash}.
      */
-    TlsHash createHash(short algorithm);
+    TlsHash createHash(short hashAlgorithm);
 
     /**
      * Create a suitable HMAC for the MAC algorithm identifier passed in.
@@ -176,18 +173,20 @@ public interface TlsCrypto
      * See enumeration class {@link MACAlgorithm} for appropriate argument values.
      * </p>
      * @param macAlgorithm the MAC algorithm the HMAC needs to match.
-     * @return a TlsHMAC.
+     * @return a {@link TlsHMAC}.
      */
-    TlsHMAC createHMAC(int macAlgorithm)
-        throws IOException;
+    TlsHMAC createHMAC(int macAlgorithm);
 
     /**
-     * Create a nonce byte[] string.
+     * Create a nonce generator. Each call should construct a new generator, and the generator
+     * should be returned from this call only after automatically seeding from this
+     * {@link TlsCrypto}'s entropy source, and from the provided additional seed material. The
+     * output of each returned generator must be completely independent of the others.
      *
-     * @param size the length, in bytes, of the nonce to generate.
-     * @return the nonce value.
+     * @param additionalSeedMaterial context-specific seed material
+     * @return a {@link TlsNonceGenerator}
      */
-    byte[] createNonce(int size);
+    TlsNonceGenerator createNonceGenerator(byte[] additionalSeedMaterial);
 
     /**
      * Create an SRP-6 client.

@@ -5,8 +5,8 @@ import java.io.PrintStream;
 import java.security.SecureRandom;
 import java.util.Vector;
 
+import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.Certificate;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.tls.AlertDescription;
 import org.bouncycastle.tls.AlertLevel;
 import org.bouncycastle.tls.CertificateRequest;
@@ -23,7 +23,6 @@ import org.bouncycastle.tls.TlsUtils;
 import org.bouncycastle.tls.crypto.TlsCertificate;
 import org.bouncycastle.tls.crypto.TlsCrypto;
 import org.bouncycastle.tls.crypto.impl.bc.BcTlsCrypto;
-import org.bouncycastle.tls.crypto.impl.jcajce.JcaTlsCryptoProvider;
 import org.bouncycastle.util.encoders.Hex;
 
 class TlsTestServerImpl
@@ -34,6 +33,7 @@ class TlsTestServerImpl
     protected int firstFatalAlertConnectionEnd = -1;
     protected short firstFatalAlertDescription = -1;
 
+    byte[] tlsServerEndPoint = null;
     byte[] tlsUnique = null;
 
     TlsTestServerImpl(TlsTestConfig config)
@@ -53,14 +53,19 @@ class TlsTestServerImpl
         return firstFatalAlertDescription;
     }
 
+    public boolean shouldCheckSigAlgOfPeerCerts()
+    {
+        return config.serverCheckSigAlgOfClientCerts;
+    }
+
     public TlsCrypto getCrypto()
     {
         switch (config.serverCrypto)
         {
         case TlsTestConfig.CRYPTO_JCA:
-            return new JcaTlsCryptoProvider().setProvider(new BouncyCastleProvider()).create(new SecureRandom(), new SecureRandom());
+            return TlsTestSuite.JCA_CRYPTO;
         default:
-            return new BcTlsCrypto(new SecureRandom());
+            return TlsTestSuite.BC_CRYPTO;
         }
     }
 
@@ -128,11 +133,13 @@ class TlsTestServerImpl
     {
         super.notifyHandshakeComplete();
 
+        tlsServerEndPoint = context.exportChannelBinding(ChannelBinding.tls_server_end_point);
         tlsUnique = context.exportChannelBinding(ChannelBinding.tls_unique);
 
         if (TlsTestConfig.DEBUG)
         {
-            System.out.println("TLS server reports 'tls-unique' = " + Hex.toHexString(tlsUnique));
+            System.out.println("TLS server reports 'tls-server-end-point' = " + hex(tlsServerEndPoint));
+            System.out.println("TLS server reports 'tls-unique' = " + hex(tlsUnique));
         }
     }
 
@@ -169,7 +176,12 @@ class TlsTestServerImpl
         }
 
         Vector certificateAuthorities = new Vector();
-        certificateAuthorities.addElement(TlsTestUtils.loadBcCertificateResource("x509-ca.pem").getSubject());
+//        certificateAuthorities.addElement(TlsTestUtils.loadBcCertificateResource("x509-ca-dsa.pem").getSubject());
+//        certificateAuthorities.addElement(TlsTestUtils.loadBcCertificateResource("x509-ca-ecdsa.pem").getSubject());
+//        certificateAuthorities.addElement(TlsTestUtils.loadBcCertificateResource("x509-ca-rsa.pem").getSubject());
+
+        // All the CA certificates are currently configured with this subject
+        certificateAuthorities.addElement(new X500Name("CN=BouncyCastle TLS Test CA"));
 
         return new CertificateRequest(certificateTypes, serverSigAlgs, certificateAuthorities);
     }
@@ -203,7 +215,10 @@ class TlsTestServerImpl
         }
 
         if (!isEmpty && !TlsTestUtils.isCertificateOneOf(context.getCrypto(), chain[0],
-            new String[]{ "x509-client.pem", "x509-client-dsa.pem", "x509-client-ecdsa.pem"}))
+            new String[]
+            { "x509-client-dsa.pem", "x509-client-ecdh.pem", "x509-client-ecdsa.pem", "x509-client-ed25519.pem",
+                "x509-client-rsa_pss_256.pem", "x509-client-rsa_pss_384.pem", "x509-client-rsa_pss_512.pem",
+                "x509-client-rsa.pem" }))
         {
             throw new TlsFatalAlert(AlertDescription.bad_certificate);
         }
@@ -223,25 +238,30 @@ class TlsTestServerImpl
 
     protected TlsCredentialedSigner getDSASignerCredentials() throws IOException
     {
-        return TlsTestUtils.loadSignerCredentials(context, getSupportedSignatureAlgorithms(), SignatureAlgorithm.dsa,
-            "x509-server-dsa.pem", "x509-server-key-dsa.pem");
+        return TlsTestUtils.loadSignerCredentialsServer(context, getSupportedSignatureAlgorithms(), SignatureAlgorithm.dsa);
     }
 
     protected TlsCredentialedSigner getECDSASignerCredentials() throws IOException
     {
-        return TlsTestUtils.loadSignerCredentials(context, getSupportedSignatureAlgorithms(), SignatureAlgorithm.ecdsa,
-            "x509-server-ecdsa.pem", "x509-server-key-ecdsa.pem");
+        // TODO[RFC 8422] Code should choose based on client's supported sig algs?
+        return TlsTestUtils.loadSignerCredentialsServer(context, getSupportedSignatureAlgorithms(), SignatureAlgorithm.ecdsa);
+//        return TlsTestUtils.loadSignerCredentialsServer(context, getSupportedSignatureAlgorithms(), SignatureAlgorithm.ed25519);
+//        return TlsTestUtils.loadSignerCredentialsServer(context, getSupportedSignatureAlgorithms(), SignatureAlgorithm.ed448);
     }
 
     protected TlsCredentialedDecryptor getRSAEncryptionCredentials() throws IOException
     {
-        return TlsTestUtils.loadEncryptionCredentials(context, new String[]{ "x509-server.pem", "x509-ca.pem" },
-            "x509-server-key.pem");
+        return TlsTestUtils.loadEncryptionCredentials(context, new String[]{ "x509-server-rsa-enc.pem", "x509-ca-rsa.pem" },
+            "x509-server-key-rsa-enc.pem");
     }
 
     protected TlsCredentialedSigner getRSASignerCredentials() throws IOException
     {
-        return TlsTestUtils.loadSignerCredentials(context, getSupportedSignatureAlgorithms(), SignatureAlgorithm.rsa,
-            "x509-server.pem", "x509-server-key.pem");
+        return TlsTestUtils.loadSignerCredentialsServer(context, getSupportedSignatureAlgorithms(), SignatureAlgorithm.rsa);
+    }
+
+    protected String hex(byte[] data)
+    {
+        return data == null ? "(null)" : Hex.toHexString(data);
     }
 }
